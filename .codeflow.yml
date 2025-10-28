@@ -1,0 +1,14 @@
+build:
+  # Disable Codeflow builds for this repo
+  engines:
+    - None
+
+operate:
+  # Required: at least one Slack channel for ops notifications (future-proofing if you ever enable deploys)
+  slack_channels:
+    - "#priv-developer-services"
+
+secure:
+  # Heimdall review requirements for PRs
+  required_reviews: 1
+  requires_mfa: true
