@@ -6,13 +6,12 @@ const config: ExpoConfig = {
     slug: 'onramp-v2-demo',
     version: '1.0.0',
     scheme: 'onrampdemo',
-    owner: 'mlion-cb',
     userInterfaceStyle: 'automatic',
     newArchEnabled: false,
     icon: './assets/images/icon.png',
 
     ios: {
-      bundleIdentifier: 'com.mlioncb.onrampv2demo', 
+      bundleIdentifier: 'com.coinbase.cdp-onramp', 
       buildNumber: process.env.IOS_BUILD_NUMBER ?? '1.0.0', // bump each submit
       supportsTablet: false,
       infoPlist: {
@@ -26,7 +25,7 @@ const config: ExpoConfig = {
         backgroundColor: '#ffffff'
       },
       edgeToEdgeEnabled: true,
-      package: "com.mlioncb.onrampv2demo"
+      package: "com.coinbase.cdp-onramp"
     },
 
     web: {

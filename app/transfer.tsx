@@ -370,7 +370,7 @@ From: ${smartAccountAddress?.slice(0, 6)}...${smartAccountAddress?.slice(-4)}`;
             value: 0n,
             data: calldata as `0x${string}`,
           }],
-          useCdpPaymaster: network === 'base' // Paymaster only on Base
+          useCdpPaymaster: isPaymasterSupported
         });
 
         console.log('✅ [TRANSFER] User operation submitted:', result);

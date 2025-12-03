@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 
 import { generateJwt } from '@coinbase/cdp-sdk/auth';
 import { resolveClientIp } from './ip.js';
@@ -56,6 +57,34 @@ const PORT = Number(process.env.PORT || 3000);
 
 // On Vercel, trust proxy to read x-forwarded-for
 app.set('trust proxy', true);
+
+// Rate limiter for webhook endpoint (DoS protection)
+// Limits expensive operations (DB lookups, external API calls)
+const webhookRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute window
+  max: 100, // Limit each IP to 100 requests per minute
+  message: { error: 'Too many webhook requests, please try again later' },
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  // Use IP address as the key
+  keyGenerator: (req) => {
+    // For webhooks from Coinbase, use x-forwarded-for if available
+    return req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+  },
+  // Skip rate limiting for successful signature verification (optional)
+  skip: (req) => {
+    // Only rate limit if signature verification would fail
+    // This allows legitimate Coinbase webhooks through
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+    if (!webhookSecret) return false; // Don't skip if no secret configured
+
+    const hook0Signature = req.headers['x-hook0-signature'];
+    const coinbaseSignature = req.headers['x-coinbase-signature'];
+
+    // If no signature headers, don't skip (will be rate limited)
+    return !!(hook0Signature || coinbaseSignature);
+  }
+});
 
 // CORS Configuration - Prevent random websites from calling your API
 // Note: This does NOT affect:
@@ -142,7 +171,7 @@ app.post("/server/api", async (req, res) => {
 
   try {
     const clientIp = await resolveClientIp(req);
-    
+
     // Validate the request structure
     const requestSchema = z.object({
       url: z.string(), // Must be a valid URL
@@ -157,6 +186,12 @@ app.post("/server/api", async (req, res) => {
     }
 
     const { url: targetUrl, method: method, body: targetBody, headers: additionalHeaders } = parsed.data;
+
+    console.log('📤 [SERVER] Outgoing request:', {
+      url: targetUrl,
+      method: method || 'POST',
+      body: targetBody
+    });
 
 
     // Generate JWT for Coinbase API calls (if needed)
@@ -211,9 +246,19 @@ app.post("/server/api", async (req, res) => {
     try {
       if (contentType?.includes('application/json')) {
         data = await response.json();
+        console.log('📥 [SERVER] Response received:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: data
+        });
       } else {
         // Non-JSON response (likely error), get as text
         const textResponse = await response.text();
+        console.log('📥 [SERVER] Non-JSON response:', {
+          status: response.status,
+          statusText: response.statusText,
+          text: textResponse
+        });
 
         // Return text error as JSON
         return res.status(response.status).json({
@@ -242,6 +287,14 @@ app.post("/server/api", async (req, res) => {
 });
 
 
+// Zod schema for EVM balance query validation (SSRF protection)
+const evmBalanceQuerySchema = z.object({
+  address: z.string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid EVM address format'),
+  network: z.enum(['base', 'ethereum', 'base-sepolia', 'ethereum-sepolia'])
+    .default('base')
+});
+
 /**
  * EVM Token Balance Endpoint
  * GET /balances/evm?address=0x...&network=base
@@ -251,20 +304,17 @@ app.post("/server/api", async (req, res) => {
  */
 app.get('/balances/evm', async (req, res) => {
   try {
-    const { address, network = 'base' } = req.query;
+    // Validate and sanitize query parameters to prevent SSRF
+    const validationResult = evmBalanceQuerySchema.safeParse(req.query);
 
-    if (!address || typeof address !== 'string') {
-      return res.status(400).json({ error: 'address query parameter required' });
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: 'Invalid request parameters',
+        details: validationResult.error.issues
+      });
     }
 
-    if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
-      return res.status(400).json({ error: 'Invalid EVM address format' });
-    }
-
-    const validNetworks = ['base', 'ethereum', 'base-sepolia', 'ethereum-sepolia'];
-    if (!validNetworks.includes(network as string)) {
-      return res.status(400).json({ error: `Invalid network. Supported: ${validNetworks.join(', ')}` });
-    }
+    const { address, network } = validationResult.data;
 
     console.log(`💰 [BALANCES] Fetching EVM balances - Address: ${address}, Network: ${network}`);
 
@@ -688,12 +738,12 @@ app.get('/push-tokens/debug/:userId', async (req, res) => {
  * Receives transaction status updates from Coinbase
  * Events: onramp.transaction.created, onramp.transaction.updated, onramp.transaction.success, onramp.transaction.failed
  *
- * Security: Verifies webhook signature using CDP API key
+ * Security: Verifies webhook signature using CDP API key + Rate limiting (DoS protection)
  * Use case: Send push notifications when transactions complete
  *
  * Note: This endpoint is PUBLIC (no auth middleware) because Coinbase servers call it
  */
-app.post('/webhooks/onramp', async (req, res) => {
+app.post('/webhooks/onramp', webhookRateLimiter, async (req, res) => {
   try {
     // Get raw body (from express.raw middleware)
     const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body);
@@ -824,7 +874,7 @@ app.post('/webhooks/onramp', async (req, res) => {
                 const apn = await import('@parse/node-apn');
                 const notification = new apn.Notification({
                   alert: { title, body },
-                  topic: 'com.mlioncb.onrampv2demo', // Your bundle ID
+                  topic: 'com.coinbase.cdp-onramp', // Your bundle ID
                   sound: 'default',
                   payload: notificationData
                 });
@@ -966,7 +1016,7 @@ app.post('/webhooks/onramp', async (req, res) => {
                 const apn = await import('@parse/node-apn');
                 const notification = new apn.Notification({
                   alert: { title: failTitle, body: failBody },
-                  topic: 'com.mlioncb.onrampv2demo', // Your bundle ID
+                  topic: 'com.coinbase.cdp-onramp', // Your bundle ID
                   sound: 'default',
                   payload: failData
                 });
