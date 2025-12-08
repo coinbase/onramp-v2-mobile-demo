@@ -30,8 +30,6 @@ A React Native + Expo mobile app demonstrating Coinbase's Onramp v2 API with CDP
 - Node.js v20+
 - iOS device or simulator
 - [Coinbase CDP account](https://portal.cdp.coinbase.com/)
-- (Optional) Twilio account - for phone verification (Apple Pay only)
-- (Optional) [ngrok account](https://ngrok.com/) (free tier works) - for Webhook
 
 ### 1. Installation
 
@@ -67,7 +65,9 @@ EXPO_PUBLIC_CDP_PROJECT_ID=your_project_id_here
 # Local server (will update with ngrok URL in step 5)
 EXPO_PUBLIC_BASE_URL=http://localhost:3000
 
-# Use Expo Crypto for Expo Go
+# Crypto implementation selector
+# - Set to 'true' for Expo Go (npx expo start)
+# - Set to 'false' for development builds (npx expo run:ios)
 EXPO_PUBLIC_USE_EXPO_CRYPTO=true
 ```
 
@@ -81,8 +81,22 @@ cp server/.env.example server/.env
 Edit `server/.env`:
 ```bash
 # CDP API Credentials from portal
-CDP_API_KEY_NAME=your_api_key_name
-CDP_API_KEY_PRIVATE_KEY=your_private_key_here
+CDP_API_KEY_ID=your_api_key_id
+CDP_API_KEY_SECRET=your_private_key_here
+
+# Optional: Webhook signing secret (for push notifications)
+WEBHOOK_SECRET=your_webhook_secret
+
+# Optional: APNs credentials (for production iOS push notifications)
+# Leave empty to use Expo Push Service in development
+APNS_KEY_ID=
+APNS_TEAM_ID=
+APNS_KEY=
+
+# Optional: Database URL (for production deployment)
+# Leave empty to use in-memory storage in development
+# Supports Redis, MongoDB, or any compatible database
+DATABASE_URL=
 ```
 
 ### 4. Start Development Servers
@@ -98,53 +112,47 @@ npm run dev
 
 ```bash
 # Terminal 2: Start Expo
+
+# Option A: Expo Go (requires USE_EXPO_CRYPTO=true in .env)
 npx expo start
-# Scan QR code with Expo Go app or open iOS simulator
+# Scan QR code with Expo Go app or press 'i' for iOS simulator
+
+# Option B: Development build (set USE_EXPO_CRYPTO=false in .env)
+npx expo run:ios
+# Builds and installs native iOS app with full crypto support
 ```
 
-### 5. Setup Webhooks with ngrok (Optional)
+### 5. Setup Webhooks for Push Notifications (Optional)
 
-**Note**: This step is **optional**. Webhooks enable push notifications for transaction updates. Without ngrok, the app works fully but you won't receive push notifications.
+**Note**: Webhooks enable real-time push notifications for transaction updates. The app works fully without webhooks, but you won't receive push notifications.
 
-If you want push notifications, open a **third terminal**:
+**⚠️ Localhost Limitation**: Coinbase webhook servers cannot reach `localhost`. To enable webhooks, you need a publicly accessible URL.
 
+**Options:**
+- **Development**: Use a tunneling service (ngrok, localtunnel, etc.) to expose your local server
+- **Production**: Deploy to a hosting platform (Vercel, Railway, Render, etc.)
+
+**Setup steps:**
+
+1. **Get a public URL** for your backend (e.g., `https://your-domain.com` or `https://abc123.ngrok.io`)
+
+2. **Update `.env`**:
+   ```bash
+   EXPO_PUBLIC_BASE_URL=https://your-public-url
+   ```
+
+3. **Create webhook subscription**: Follow [CDP webhook documentation](https://docs.cdp.coinbase.com/onramp-&-offramp/webhooks#create-a-webhook-subscription) using your webhook URL: `https://your-public-url/webhooks/onramp`
+
+4. **Restart Expo** (press `r` in terminal)
+
+**Testing on physical device without webhooks:**
 ```bash
-# Install ngrok globally (if not already installed)
-npm install -g ngrok
-
-# Start ngrok tunnel
-ngrok http 3000
+# Get your local network IP
+ipconfig getifaddr en0
+# Update .env: EXPO_PUBLIC_BASE_URL=http://192.168.1.100:3000
 ```
 
-You'll see output like:
-```
-Forwarding  https://abc123.ngrok.io -> http://localhost:3000
-```
-
-**Copy the ngrok URL** (e.g., `https://abc123.ngrok.io`) and update `.env`:
-
-```bash
-# Update this line in root .env
-EXPO_PUBLIC_BASE_URL=https://abc123.ngrok.io
-```
-
-**Create webhook subscription**:
-
-Follow the instructions to [create a webhook subscription](https://docs.cdp.coinbase.com/onramp-&-offramp/webhooks#create-a-webhook-subscription) using your ngrok URL (e.g., `https://abc123.ngrok.io/server/webhook`).
-
-**Restart Expo** (press `r` in Terminal 2)
-
-> **Note**: Free ngrok URLs change every time you restart. Update `.env` and re-create webhook subscription each time and restart Expo. See [webhook documentation](https://docs.cdp.coinbase.com/onramp-&-offramp/webhooks) for details.
->
-> **Alternative (without ngrok)**: The app will work but webhooks/push notifications won't function (Coinbase servers can't reach localhost).
-> - **Testing on Simulator**: Keep `EXPO_PUBLIC_BASE_URL=http://localhost:3000`
-> - **Testing on Physical Device**: Use your local network IP:
->   ```bash
->   # Get your local IP address
->   ipconfig getifaddr en0
->   # Update .env with: EXPO_PUBLIC_BASE_URL=http://YOUR_LOCAL_IP:3000
->   # Example: EXPO_PUBLIC_BASE_URL=http://192.168.1.100:3000
->   ```
+**⚠️ iOS Simulator**: Push notifications do NOT work on iOS Simulator. Use a physical device for testing.
 
 ### 6. Run the App
 
@@ -248,12 +256,13 @@ On Base network, transfers of USDC, EURC, or BTC are **gasless** (no ETH needed 
 ### "Wallet not creating"
 - Verify `EXPO_PUBLIC_CDP_PROJECT_ID` is correct
 - Check CDP Portal for project status
-- Ensure you're using email address that hasn't been used before
 
 ### "Push notifications not working"
-- Should work automatically in Expo Go
-- Verify ngrok tunnel is running
-- Check `.env` has correct ngrok URL
+- **iOS Simulator**: Push notifications do not work on iOS Simulator. Use a physical device.
+- Should work automatically in Expo Go on physical devices (uses Expo Push Service)
+- For webhooks, verify your backend has a public URL (localhost won't work)
+- Check `.env` has correct `EXPO_PUBLIC_BASE_URL`
+- Verify webhook subscription is created in CDP Portal
 - Restart Expo after updating `.env`
 
 ### "Transaction failing"
@@ -298,15 +307,25 @@ Check Expo logs:
 | Variable | Description |
 |----------|-------------|
 | `EXPO_PUBLIC_CDP_PROJECT_ID` | Your CDP project ID |
-| `EXPO_PUBLIC_BASE_URL` | Backend URL (ngrok URL) |
-| `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go |
+| `EXPO_PUBLIC_BASE_URL` | Backend server URL (public URL for webhooks, or `http://localhost:3000` for local testing) |
+| `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go (`npx expo start`), `false` for dev builds (`npx expo run:ios`) |
 
 ### Required (Server `.env`)
 
 | Variable | Description |
 |----------|-------------|
-| `CDP_API_KEY_NAME` | CDP API key name |
-| `CDP_API_KEY_PRIVATE_KEY` | CDP private key |
+| `CDP_API_KEY_ID` | CDP API key ID |
+| `CDP_API_KEY_SECRET` | CDP API private key |
+
+### Optional (Server `.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `WEBHOOK_SECRET` | Webhook signing secret from CDP Portal (required for push notifications) |
+| `APNS_KEY_ID` | Apple Push Notification service key ID (for production iOS notifications) |
+| `APNS_TEAM_ID` | Apple Developer Team ID |
+| `APNS_KEY` | APNs private key (.p8 file content) |
+| `DATABASE_URL` | Database URL for production deployment (supports Redis, MongoDB, etc. - uses in-memory storage if not set) |
 
 ## Documentation
 

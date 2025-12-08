@@ -90,14 +90,15 @@
  * @see utils/sharedState.ts for address resolution
  */
 
-import { useCurrentUser, useEvmAddress, useIsSignedIn, useSolanaAddress } from "@coinbase/cdp-hooks";
+import { useCurrentUser, useEvmAddress, useIsSignedIn, useSignOut, useSolanaAddress } from "@coinbase/cdp-hooks";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { ApplePayWidget, OnrampForm, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { COLORS } from "../../constants/Colors";
-import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
+import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
+import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 
 
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE } = COLORS;
@@ -117,9 +118,18 @@ export default function Index() {
   const [showAlert, setShowAlert] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
   const [amount, setAmount] = useState("");
-  const [sandboxMode, setSandboxModeState] = useState(getSandboxMode());
   const router = useRouter();
   const pendingForm = getPendingForm();
+
+  // Store current transaction details for alert messages
+  const [currentTransaction, setCurrentTransaction] = useState<{
+    amount: string;
+    paymentCurrency: string;
+    asset: string;
+    network: string;
+  } | null>(null);
+
+  
 
 
   // Check for test session first
@@ -130,6 +140,7 @@ export default function Index() {
   const { currentUser } = useCurrentUser();
   const { evmAddress: cdpEvmAddress } = useEvmAddress();
   const { solanaAddress: cdpSolanaAddress } = useSolanaAddress();
+  const { signOut } = useSignOut();
   const [connectedAddress, setConnectedAddress] = useState('');
 
   // Override addresses for test session
@@ -201,8 +212,6 @@ export default function Index() {
       if (walletAddress) {
         setAddress(walletAddress);
       }
-      // Update sandbox mode state when tab becomes active
-      setSandboxModeState(getSandboxMode());
     }, [])
   );
 
@@ -221,12 +230,6 @@ export default function Index() {
     }
 
     // Get addresses from CDP hooks
-    console.log('🔍 [DEBUG] currentUser.evmSmartAccounts:', currentUser?.evmSmartAccounts);
-    console.log('🔍 [DEBUG] currentUser.evmAccounts:', currentUser?.evmAccounts);
-    console.log('🔍 [DEBUG] evmAddress from hook:', evmAddress);
-    console.log('🔍 [DEBUG] currentUser.solanaAccounts:', currentUser?.solanaAccounts);
-    console.log('🔍 [DEBUG] solanaAddress from hook:', solanaAddress);
-
     const evmSmartAccount = currentUser?.evmSmartAccounts?.[0] as string;
     const evmEOA = currentUser?.evmAccounts?.[0] as string || evmAddress;
     const solAccount = currentUser?.solanaAccounts?.[0] as string || solanaAddress;
@@ -296,15 +299,21 @@ export default function Index() {
     title: string;
     message: string;
     type: 'success' | 'error' | 'info';
+    navigationPath?: string;
+    onConfirmCallback?: () => Promise<void> | void;
+    onCancelCallback?: () => void;
   }>({
     visible: false,
     title: '',
     message: '',
-    type: 'info'
+    type: 'info',
+    navigationPath: undefined,
+    onConfirmCallback: undefined,
+    onCancelCallback: undefined
   });
 
 
-  const { 
+  const {
     createOrder,
     createWidgetSession,
     closeApplePay,
@@ -322,8 +331,32 @@ export default function Index() {
     isProcessingPayment,
     setTransactionStatus,
     setIsProcessingPayment,
-    paymentCurrencies
+    paymentCurrencies,
+    buyConfig,
+    getNetworkNameFromDisplayName,
+    getAssetSymbolFromName
   } = useOnramp();
+
+  // Refetch options is handled on screen focus and within OnrampForm when needed
+
+  // Track region changes and refetch buy options
+  const [lastRegion, setLastRegion] = useState(() => `${getCountry()}-${getSubdivision()}`);
+
+  // Poll for region changes (detects changes from OnrampForm selectors)
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const currentRegion = `${getCountry()}-${getSubdivision()}`;
+      if (currentRegion !== lastRegion) {
+        console.log('🌍 Region changed, refetching buy options:', { from: lastRegion, to: currentRegion });
+        setLastRegion(currentRegion);
+        if (effectiveIsSignedIn) {
+          fetchOptions();
+        }
+      }
+    }, 500); // Check every 500ms
+
+    return () => clearInterval(intervalId);
+  }, [lastRegion, effectiveIsSignedIn, fetchOptions]);
 
   // Fetch options on component mount (only when signed in)
   useFocusEffect(
@@ -347,6 +380,7 @@ export default function Index() {
         try {
           // If pending was for Coinbase Widget, do it immediately (no phone gate)
           if ((pendingForm.paymentMethod || '').toUpperCase() === 'COINBASE_WIDGET') {
+            console.log('📤 [PENDING FORM] Processing Coinbase Widget pending form');
             (async () => {
               const url = await createWidgetSession(pendingForm);
               if (url) {
@@ -357,29 +391,60 @@ export default function Index() {
             return;
           }
 
+          // Apple Pay path - wait for user to be signed in before proceeding
+          if (!effectiveIsSignedIn) {
+            return; // Wait for next render when user is signed in
+          }
+
           // Apple Pay path still requires fresh phone
           const isSandbox = getSandboxMode();
-          if (isSandbox || (isPhoneFresh60d() && getVerifiedPhone())) {
-            const phone = getVerifiedPhone();
+          const phoneFresh = isPhoneFresh60d();
+          const verifiedPhone = getVerifiedPhone();
+
+          if (isSandbox || (phoneFresh && verifiedPhone)) {
+            const phone = verifiedPhone;
+
+            // CRITICAL: Convert display names to API format (e.g., "Base" → "base", "USD Coin" → "USDC")
+            // This is the same conversion that happens in handleSubmit but was missing here
+            const networkApiName = getNetworkNameFromDisplayName(pendingForm.network);
+            const assetApiName = getAssetSymbolFromName(pendingForm.asset);
 
             // Determine the correct address based on network type for pending form
             let targetAddress = pendingForm.address;
             if (!isSandbox) {
-              const networkType = (pendingForm.network || '').toLowerCase();
+              const networkType = networkApiName.toLowerCase();
               const isEvmNetwork = ['ethereum', 'base', 'unichain', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'avax', 'bsc', 'fantom', 'linea', 'zksync', 'scroll'].some(k => networkType.includes(k));
               const isSolanaNetwork = ['solana', 'sol'].some(k => networkType.includes(k));
 
               if (isEvmNetwork) {
                 const evmEOA = currentUser?.evmAccounts?.[0] as string || evmAddress;
                 const evmSmart = currentUser?.evmSmartAccounts?.[0] as string;
-                targetAddress = evmEOA || evmSmart || targetAddress;
+                // Prioritize Smart Account for onramp (balances stored there)
+                targetAddress = evmSmart || evmEOA || targetAddress;
               } else if (isSolanaNetwork) {
                 const solAccount = currentUser?.solanaAccounts?.[0] as string || solanaAddress;
                 targetAddress = solAccount || targetAddress;
               }
             }
 
-            createOrder({ ...pendingForm, phoneNumber: phone, address: targetAddress });
+            // Update form data with converted API names and correct address
+            const updatedFormData = {
+              ...pendingForm,
+              network: networkApiName,
+              asset: assetApiName,
+              phoneNumber: phone,
+              address: targetAddress
+            };
+
+            // Store transaction details for alert messages
+            setCurrentTransaction({
+              amount: updatedFormData.amount,
+              paymentCurrency: updatedFormData.paymentCurrency || 'USD',
+              asset: assetApiName,
+              network: networkApiName
+            });
+
+            createOrder(updatedFormData);
             setPendingForm(null);
           }
         } catch (error) {
@@ -393,55 +458,218 @@ export default function Index() {
         }
       };
       handlePendingForm();
-    }, [pendingForm, createOrder, createWidgetSession])
+    }, [pendingForm, createOrder, createWidgetSession, getNetworkNameFromDisplayName, getAssetSymbolFromName, currentUser, evmAddress, solanaAddress, effectiveIsSignedIn])
   );
 
   const handleSubmit = useCallback(async (formData: any) => {
     setIsProcessingPayment(true);
-    try {
-      // Determine the correct address based on network type
-      const isSandbox = getSandboxMode();
-      let targetAddress = formData.address;
 
-      if (!isSandbox) {
-        // In production mode, use network-specific addresses
-        const networkType = (formData.network || '').toLowerCase();
-        const isEvmNetwork = ['ethereum', 'base', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'avax', 'bsc', 'fantom', 'linea', 'zksync', 'scroll'].some(k => networkType.includes(k));
-        const isSolanaNetwork = ['solana', 'sol'].some(k => networkType.includes(k));
+    // CRITICAL: Convert display names to API format (e.g., "Solana" → "solana", "USD Coin" → "USDC")
+    const networkApiName = getNetworkNameFromDisplayName(formData.network);
+    const assetApiName = getAssetSymbolFromName(formData.asset);
 
-        if (isEvmNetwork) {
-          // Use EVM address for EVM networks
-          const evmEOA = currentUser?.evmAccounts?.[0] as string || evmAddress;
-          const evmSmart = currentUser?.evmSmartAccounts?.[0] as string;
-          targetAddress = evmEOA || evmSmart || targetAddress;
-        } else if (isSolanaNetwork) {
-          // Use Solana address for Solana networks
-          const solAccount = currentUser?.solanaAccounts?.[0] as string || solanaAddress;
-          targetAddress = solAccount || targetAddress;
-        }
+    // Determine the correct address based on network type (moved outside try-catch)
+    const isSandbox = getSandboxMode();
+    let targetAddress = formData.address;
+
+    if (!isSandbox) {
+      // In production mode, use network-specific addresses
+      const networkType = networkApiName.toLowerCase();
+      const isEvmNetwork = ['ethereum', 'base', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'avax', 'bsc', 'fantom', 'linea', 'zksync', 'scroll'].some(k => networkType.includes(k));
+      const isSolanaNetwork = ['solana', 'sol'].some(k => networkType.includes(k));
+
+      if (isEvmNetwork) {
+        // Use EVM address for EVM networks
+        const evmEOA = currentUser?.evmAccounts?.[0] as string || evmAddress;
+        const evmSmart = currentUser?.evmSmartAccounts?.[0] as string;
+        targetAddress = evmEOA || evmSmart || targetAddress;
+      } else if (isSolanaNetwork) {
+        // Use Solana address for Solana networks
+        const solAccount = currentUser?.solanaAccounts?.[0] as string || solanaAddress;
+        targetAddress = solAccount || targetAddress;
       }
+    }
 
-      // Update the form data with the correct address
-      const updatedFormData = { ...formData, address: targetAddress };
+    // Update the form data with converted API names and correct address
+    const updatedFormData = {
+      ...formData,
+      network: networkApiName,
+      asset: assetApiName,
+      address: targetAddress
+    };
 
-      // Coinbase Widget: skip phone verification
+    try {
+      // Store transaction details for alert messages
+      setCurrentTransaction({
+        amount: updatedFormData.amount,
+        paymentCurrency: updatedFormData.paymentCurrency || 'USD',
+        asset: assetApiName,
+        network: networkApiName
+      });
+
+      // Coinbase Widget: skip phone/email verification
       if ((formData.paymentMethod || '').toUpperCase() === 'COINBASE_WIDGET') {
         const url = await createWidgetSession(updatedFormData);
         if (url) Linking.openURL(url);
         return; // do not call createOrder()
       }
 
-      // Apple Pay: require phone verification
-      const fresh = isPhoneFresh60d();
-      const phone = getVerifiedPhone();
-      if (!isSandbox && (!fresh || !phone)) {
+      // Apple Pay: createOrder will validate email + phone and throw appropriate errors
+      await createOrder(updatedFormData);
+    } catch (error: any) {
+      // Handle missing email - show confirmation before linking
+      if (error.code === 'MISSING_EMAIL') {
         setPendingForm(updatedFormData);
-        router.push({ pathname: '/phone-verify', params: { initialPhone: phone || '' } });
+        setApplePayAlert({
+          visible: true,
+          title: 'Link Email for Apple Pay',
+          message: 'Apple Pay requires both email and phone verification for compliance.\n\nWould you like to link your email to this account to continue?',
+          type: 'info',
+          navigationPath: '/email-verify?mode=link'
+        });
         return;
       }
 
-      await createOrder(updatedFormData);
-    } catch (error) {
+      // Handle missing phone - show confirmation before linking/verifying
+      if (error.code === 'MISSING_PHONE') {
+        setPendingForm(updatedFormData);
+        // Use test phone for test sessions, real phone for production
+        const cdpPhone = testSession
+          ? TEST_ACCOUNTS.phone
+          : currentUser?.authenticationMethods?.sms?.phoneNumber;
+
+        // If phone is linked to CDP but not verified/expired, use re-verify flow
+        if (cdpPhone) {
+          const isUSPhone = cdpPhone.startsWith('+1');
+          const disclaimer = isUSPhone ? '' : '\n\nNote: Apple Pay is only available for US phone numbers. You can use this flow to experience the verification process.';
+
+          setApplePayAlert({
+            visible: true,
+            title: 'Re-verify Phone for Apple Pay',
+            message: `Your phone is linked but needs verification.\n\nTo verify, we need to sign you out and send a verification code to your phone.\n\nWould you like to continue?${disclaimer}`,
+            type: 'info',
+            onConfirmCallback: async () => {
+              try {
+                console.log('🔄 [INDEX] Starting phone verification');
+
+                // Sign out first (skip for test sessions)
+                if (!testSession) {
+                  console.log('🔄 [INDEX] Signing out for re-verification');
+                  await signOut();
+                  // Wait for sign out to complete
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } else {
+                  console.log('🧪 [INDEX] Test session - skipping sign out');
+                }
+
+                console.log('✅ [INDEX] Navigating to phone-verify with pre-filled number');
+
+                // Navigate to phone-verify with phone pre-filled and auto-send enabled
+                router.replace({
+                  pathname: '/phone-verify',
+                  params: {
+                    initialPhone: cdpPhone,
+                    mode: 'signin',
+                    autoSend: 'true'
+                  }
+                });
+              } catch (signOutError: any) {
+                console.error('❌ [INDEX] Verification error:', signOutError);
+                setApplePayAlert({
+                  visible: true,
+                  title: 'Error',
+                  message: signOutError.message || 'Failed to start verification. Please try again.',
+                  type: 'error'
+                });
+              }
+            },
+            onCancelCallback: () => {
+              // Cancel re-verification - clear pending form and reset processing state
+              console.log('❌ [INDEX] User canceled phone re-verification');
+              setPendingForm(null);
+              setIsProcessingPayment(false);
+            }
+          });
+        } else {
+          // No phone linked at all - use link mode
+          setApplePayAlert({
+            visible: true,
+            title: 'Link Phone for Apple Pay',
+            message: 'Apple Pay requires both email and phone verification for compliance.\n\nWould you like to link your phone to this account to continue?',
+            type: 'info',
+            navigationPath: '/phone-verify?mode=link'
+          });
+        }
+        return;
+      }
+
+      // Handle expired phone - show confirmation before re-verifying
+      if (error.code === 'PHONE_EXPIRED') {
+        setPendingForm(updatedFormData);
+        const expiredPhone = getVerifiedPhone();
+        const isUSPhone = expiredPhone?.startsWith('+1');
+        const disclaimer = isUSPhone ? '' : '\n\nNote: Apple Pay is only available for US phone numbers. You can use this flow to experience the verification process.';
+
+        setApplePayAlert({
+          visible: true,
+          title: 'Re-verify Phone for Apple Pay',
+          message: `Your phone verification has expired (valid for 60 days).\n\nTo re-verify, we need to sign you out and send a new verification code to your phone.\n\nWould you like to continue?${disclaimer}`,
+          type: 'info',
+          onConfirmCallback: async () => {
+            try {
+              console.log('🔄 [INDEX] Starting phone re-verification - signing out');
+
+              // Sign out first
+              await signOut();
+
+              // Wait for sign out to complete
+              await new Promise(resolve => setTimeout(resolve, 500));
+
+              console.log('✅ [INDEX] Signed out, navigating to phone-verify with pre-filled number');
+
+              // Navigate to phone-verify with phone pre-filled and auto-send enabled
+              router.replace({
+                pathname: '/phone-verify',
+                params: {
+                  initialPhone: expiredPhone,
+                  mode: 'signin',
+                  autoSend: 'true'
+                }
+              });
+            } catch (signOutError: any) {
+              console.error('❌ [INDEX] Re-verification error:', signOutError);
+              setApplePayAlert({
+                visible: true,
+                title: 'Error',
+                message: signOutError.message || 'Failed to start re-verification. Please try again.',
+                type: 'error'
+              });
+            }
+          },
+          onCancelCallback: () => {
+            // Cancel re-verification - clear pending form and reset processing state
+            console.log('❌ [INDEX] User canceled phone re-verification');
+            setPendingForm(null);
+            setIsProcessingPayment(false);
+          }
+        });
+        return;
+      }
+
+      // Handle non-US phone - show info alert
+      if (error.code === 'NON_US_PHONE') {
+        setPendingForm(null); // Clear pending form since this requires user action
+        setApplePayAlert({
+          visible: true,
+          title: 'US Phone Required',
+          message: 'Apple Pay Guest Checkout is only available for US phone numbers.\n\nYou can:\n• Switch to Coinbase Widget for international payments\n• Use Sandbox mode to test the Apple Pay flow\n• Link a US phone number to your account',
+          type: 'info'
+        });
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      // Generic error
       setApplePayAlert({
         visible: true,
         title: 'Transaction Failed',
@@ -451,7 +679,7 @@ export default function Index() {
       console.error('Error submitting form:', error);
       setIsProcessingPayment(false);
     }
-  }, [createOrder, createWidgetSession, router, currentUser, evmAddress, solanaAddress]);
+  }, [createOrder, createWidgetSession, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut]);
     
   
   return (
@@ -459,6 +687,8 @@ export default function Index() {
       <View style={styles.header}>
         <Text style={styles.title}>Onramp V2 Demo</Text>
       </View>
+
+      
 
       {/* Error banner for failed options fetch */}
       {optionsError && !isLoadingOptions && (
@@ -480,7 +710,6 @@ export default function Index() {
       )}
 
       <OnrampForm
-        key={`${getCountry()}-${getSubdivision()}`}   // remount on region change
         address={address}
         onAddressChange={(newAddress) => {
           setAddress(newAddress);
@@ -498,8 +727,10 @@ export default function Index() {
         paymentCurrencies={paymentCurrencies}
         amount={amount}
         onAmountChange={setAmount}
-        sandboxMode={sandboxMode}
+        buyConfig={buyConfig}
       />
+
+      
 
       {applePayVisible && (
         <ApplePayWidget
@@ -508,8 +739,15 @@ export default function Index() {
             closeApplePay(); // Stop loading when closed
           }}
           setIsProcessingPayment={setIsProcessingPayment}
+          isSandbox={getCurrentPartnerUserRef()?.startsWith('sandbox-') || false}
           onAlert={(title, message, type) => {
-            setApplePayAlert({ visible: true, title, message, type });
+            // Enhance alert message with transaction details
+            let enhancedMessage = message;
+            if (currentTransaction) {
+              const txDetails = `\n\n${currentTransaction.amount} ${currentTransaction.paymentCurrency} → ${currentTransaction.asset} (${currentTransaction.network})`;
+              enhancedMessage = message + txDetails;
+            }
+            setApplePayAlert({ visible: true, title, message: enhancedMessage, type });
           }}
         />
       )}
@@ -526,8 +764,38 @@ export default function Index() {
         title={applePayAlert.title}
         message={applePayAlert.message}
         type={applePayAlert.type}
-        onConfirm={() => setApplePayAlert(prev => ({ ...prev, visible: false }))}
+        onConfirm={async () => {
+          const navPath = applePayAlert.navigationPath;
+          const callback = applePayAlert.onConfirmCallback;
+          setApplePayAlert({ visible: false, title: '', message: '', type: 'info', navigationPath: undefined, onConfirmCallback: undefined, onCancelCallback: undefined });
+
+          // Clear transaction details after alert is dismissed
+          setCurrentTransaction(null);
+
+          // Execute callback if it exists (e.g., sign out + navigate for re-verify)
+          if (callback) {
+            await callback();
+          }
+          // Otherwise navigate if path is provided (e.g., link phone/email)
+          else if (navPath) {
+            router.push(navPath as any);
+          }
+        }}
+        onCancel={applePayAlert.onCancelCallback ? () => {
+          const cancelCallback = applePayAlert.onCancelCallback;
+          setApplePayAlert({ visible: false, title: '', message: '', type: 'info', navigationPath: undefined, onConfirmCallback: undefined, onCancelCallback: undefined });
+
+          // Clear transaction details after alert is dismissed
+          setCurrentTransaction(null);
+
+          // Execute cancel callback if it exists
+          if (cancelCallback) {
+            cancelCallback();
+          }
+        } : undefined}
       />
+
+      
     </View>
   );
 }
@@ -536,7 +804,7 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: DARK_BG, 
+    backgroundColor: DARK_BG,
   },
   header: {
     flexDirection: "row",
@@ -637,6 +905,33 @@ const styles = StyleSheet.create({
     color: WHITE,
     fontSize: 14,
     fontWeight: '600',
+  },
+  sandboxToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 20,
+    marginTop: 16,
+  },
+  sandboxToggleContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  sandboxToggleLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: TEXT_PRIMARY,
+    marginBottom: 4,
+  },
+  sandboxToggleHint: {
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+    lineHeight: 16,
   },
 });
 

@@ -65,25 +65,30 @@ import { WebView } from "react-native-webview";
  * - Remove this in production code (use original paymentUrl)
  * - Ensures feature is enabled regardless of sandbox/prod mode
  */
-export function ApplePayWidget({ 
-  paymentUrl, 
-  onClose, 
+export function ApplePayWidget({
+  paymentUrl,
+  onClose,
   setIsProcessingPayment,
   setTransactionStatus,
-  onAlert
-}: { 
+  onAlert,
+  isSandbox = false
+}: {
   paymentUrl: string;
   onClose?: () => void;
   setIsProcessingPayment?: (loading: boolean) => void;
-  setTransactionStatus?: (status: 'pending' | 'success' | 'error' | null) => void; 
-  onAlert?: (title: string, message: string, type: 'success' | 'error' | 'info') => void; // Add this line
+  setTransactionStatus?: (status: 'pending' | 'success' | 'error' | null) => void;
+  onAlert?: (title: string, message: string, type: 'success' | 'error' | 'info') => void;
+  isSandbox?: boolean; // Indicates sandbox mode (partnerUserRef prefixed with "sandbox-")
 }) {
   const webViewRef = useRef<WebView>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Add timeout ref
 
   // const finalUrl = `${paymentUrl}`;
   // CRITICAL: forceFeature used for demo purposes; Use original paymentLink like above for production code
-  const finalUrl = `${paymentUrl}&forceFeature=true`; 
+  const finalUrl = `${paymentUrl}&forceFeature=true`;
+
+  // Sandbox prefix for alerts
+  const sandboxPrefix = isSandbox ? '[SANDBOX] ' : ''; 
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -120,7 +125,7 @@ export function ApplePayWidget({
           onAlert?.("Payment Timeout", "The payment process took too long. Please try again.", 'error');
           setIsProcessingPayment?.(false);
           onClose?.();
-        }, 30000); // 30 second timeout
+        }, 60000); // 30 second timeout
       }}
 
       onMessage={({ nativeEvent }) => {
@@ -158,21 +163,21 @@ export function ApplePayWidget({
               
             case "onramp_api.cancel":
               console.log('User cancels Apple pop-up');
-              onAlert?.("Payment Cancelled", "The payment was cancelled by the user", 'info');
+              onAlert?.(`${sandboxPrefix}Payment Cancelled`, "The payment was cancelled by the user", 'info');
               // Stop loading and close
               setIsProcessingPayment?.(false);
               onClose?.();
               break;
-              
+
             case "onramp_api.commit_error":
             case "onramp_api.load_error":
               console.log('Payment cancelled or error,', data.data);
-              onAlert?.("Payment Error", `The payment failed: ${data.data.errorCode} - ${data.data.errorMessage}`, 'error');
+              onAlert?.(`${sandboxPrefix}Payment Error`, `The payment failed: ${data.data.errorCode} - ${data.data.errorMessage}`, 'error');
               // Stop loading and close
               setIsProcessingPayment?.(false);
               onClose?.();
               break;
-              
+
             case "onramp_api.commit_success":
               if (timeoutRef.current) {
                 clearTimeout(timeoutRef.current);
@@ -181,7 +186,7 @@ export function ApplePayWidget({
               console.log('Payment successful! Now tracking transaction...');
               setTransactionStatus?.('pending');
               // Show immediate success for payment
-              onAlert?.("Payment Successful!", "Your payment has been processed. We're now delivering your crypto to your wallet. You may stay to track the transaction or close this window and track history later", 'success');
+              onAlert?.(`${sandboxPrefix}Payment Successful!`, "Your payment has been processed. We're now delivering your crypto to your wallet. You may stay to track the transaction or close this window and track history later", 'success');
               break;
 
             // Optional tracking or polling events (transaction on chain)
@@ -203,14 +208,14 @@ export function ApplePayWidget({
             case "onramp_api.polling_success":
               console.log('Funds delivered to wallet!');
               setTransactionStatus?.('success');
-              onAlert?.("Complete!", "Your crypto has been delivered to your wallet!", 'success');
+              onAlert?.(`${sandboxPrefix}Complete!`, "Your crypto has been delivered to your wallet!", 'success');
               setTimeout(() => onClose?.(), 2000);
               break;
-            
+
             case "onramp_api.polling_error":
               console.log('Transaction failed on blockchain', data.data);
               setTransactionStatus?.('error');
-              onAlert?.("Transaction Failed", `There was an issue processing your transaction: ${data.data.errorCode} - ${data.data.errorMessage}`, 'error');
+              onAlert?.(`${sandboxPrefix}Transaction Failed`, `There was an issue processing your transaction: ${data.data.errorCode} - ${data.data.errorMessage}`, 'error');
               setTimeout(() => onClose?.(), 2000);
               break;
 

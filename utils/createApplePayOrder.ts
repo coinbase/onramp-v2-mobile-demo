@@ -6,6 +6,7 @@ import { authenticatedFetch } from "./authenticatedFetch";
  * 1. Enhanced request logging (method, headers, body preview)
  * 2. Response cloning for safe logging
  * 3. Proper error re-throwing for UI handling
+ * 4. Test mode: Server automatically applies sandbox mode for TestFlight tokens
  */
 
 export async function createApplePayOrder(payload: any) {

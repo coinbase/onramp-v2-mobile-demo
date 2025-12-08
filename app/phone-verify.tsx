@@ -3,131 +3,290 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { CoinbaseAlert } from '../components/ui/CoinbaseAlerts';
-import { BASE_URL } from '../constants/BASE_URL';
 import { COLORS } from '../constants/Colors';
 import { TEST_ACCOUNTS } from '../constants/TestAccounts';
-import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { PHONE_COUNTRIES } from '../constants/PhoneCountries';
 import { clearPendingForm, markPhoneVerifyCanceled } from '../utils/sharedState';
+import { useSignInWithSms, useLinkSms, useCurrentUser, useIsSignedIn, useSignOut } from '@coinbase/cdp-hooks';
 
 const { DARK_BG, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BORDER, BLUE, WHITE } = COLORS;
+
+// Use shared phone countries constant
+const SUPPORTED_COUNTRIES = PHONE_COUNTRIES;
 
 export default function PhoneVerifyScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const initialPhone = params.initialPhone as string || '';
-  const [phoneDisplay, setPhoneDisplay] = useState(''); // What user sees: (201) 555-0123
-  const [phoneE164, setPhoneE164] = useState(''); // What we send: +12015550123
+  const mode = (params.mode as 'signin' | 'link' | 'reverify') || 'link'; // Default to link for backwards compat
+  const autoSend = params.autoSend === 'true'; // Flag to auto-send OTP
 
-  const [phone, setPhone] = useState(initialPhone);
+  const [selectedCountry, setSelectedCountry] = useState(SUPPORTED_COUNTRIES[0]); // Default to US
+  const [phoneNumber, setPhoneNumber] = useState(''); // Just the digits, no country code
   const [sending, setSending] = useState(false);
   const [alert, setAlert] = useState<{visible:boolean; title:string; message:string; type:'success'|'error'|'info'}>({
     visible:false, title:'', message:'', type:'info'
   });
+  const [countryPickerVisible, setCountryPickerVisible] = useState(false);
+  const [hasAutoSent, setHasAutoSent] = useState(false); // Track if we've auto-sent SMS
 
-  // Format phone number as user types
-  const formatPhoneNumber = (input: string) => {
+  // CDP hooks - use different hook based on mode
+  const { signInWithSms } = useSignInWithSms();
+  const { linkSms } = useLinkSms();
+  const { isSignedIn } = useIsSignedIn();
+  const { currentUser } = useCurrentUser();
+  const { signOut } = useSignOut();
+
+  // Parse initialPhone and pre-fill form
+  React.useEffect(() => {
+    if (initialPhone) {
+      // Parse E164 phone number (e.g., +6583331214)
+      const country = SUPPORTED_COUNTRIES.find(c => initialPhone.startsWith(c.code));
+      if (country) {
+        setSelectedCountry(country);
+        setPhoneNumber(initialPhone.slice(country.code.length)); // Remove country code
+      }
+    }
+  }, [initialPhone]);
+
+  // Auto-send SMS for reverify mode (when user is still signed in but phone expired)
+  // OR when autoSend flag is set (from profile re-verify button)
+  React.useEffect(() => {
+    const shouldAutoSend =
+      (mode === 'reverify' && initialPhone && isSignedIn) || // Reverify: user still signed in
+      (autoSend && initialPhone); // Profile re-verify: explicit auto-send flag
+
+    // Only auto-send if phoneNumber is actually populated and valid
+    const isReady = phoneNumber && phoneNumber.length >= selectedCountry.minDigits;
+
+    if (shouldAutoSend && isReady && !hasAutoSent && !sending) {
+      console.log('🔄 [PHONE-VERIFY] Auto-sending SMS:', { mode, autoSend, isSignedIn, phoneNumber });
+      setHasAutoSent(true);
+      // Trigger SMS send after a short delay to ensure UI is ready
+      setTimeout(() => {
+        startSms();
+      }, 500);
+    }
+  }, [mode, initialPhone, hasAutoSent, sending, isSignedIn, autoSend, phoneNumber, selectedCountry]);
+
+  // Handle phone number input
+  const handlePhoneChange = (input: string) => {
     // Remove all non-digits
     const digits = input.replace(/\D/g, '');
-    
-    // Limit to 10 digits (US phone number)
-    const limitedDigits = digits.slice(0, 10);
-    
-    // Format based on length
-    if (limitedDigits.length === 0) {
-      return '';
-    } else if (limitedDigits.length <= 3) {
-      return `(${limitedDigits}`;
-    } else if (limitedDigits.length <= 6) {
-      return `(${limitedDigits.slice(0, 3)}) ${limitedDigits.slice(3)}`;
-    } else {
-      return `(${limitedDigits.slice(0, 3)}) ${limitedDigits.slice(3, 6)}-${limitedDigits.slice(6)}`;
-    }
+    setPhoneNumber(digits);
   };
 
-  const handlePhoneChange = (input: string) => {
-    // If user is deleting and hits a formatted character, remove it
-    if (input.length < phoneDisplay.length) {
-      // User is deleting - extract just the digits
-      const digits = input.replace(/\D/g, '');
-      const formatted = formatPhoneNumber(digits);
-      setPhoneDisplay(formatted);
-      
-      // Convert to E164 format
-      if (digits.length === 10) {
-        setPhoneE164(`+1${digits}`);
-      } else {
-        setPhoneE164('');
-      }
-      return;
-    }
-    
-    // User is typing - normal formatting
-    const formatted = formatPhoneNumber(input);
-    setPhoneDisplay(formatted);
-    
-    // Convert to E164 format
-    const digits = input.replace(/\D/g, '');
-    if (digits.length === 10) {
-      setPhoneE164(`+1${digits}`);
-    } else {
-      setPhoneE164('');
-    }
+  // Get full E164 phone number
+  const getE164Phone = () => {
+    if (!phoneNumber) return '';
+    return `${selectedCountry.code}${phoneNumber}`;
   };
 
-  const isPhoneValid = phoneE164.length === 12; // +1 + 10 digits
-
-
-  // const e164Like = (s: string) => /^\+[1-9]\d{6,15}$/.test(s.trim());
+  // Validate phone number based on selected country
+  const isPhoneValid = phoneNumber.replace(/\D/g, '').length >= selectedCountry.minDigits;
 
   const startSms = async () => {
     if (!isPhoneValid) {
-      setAlert({ visible:true, title:'Error', message:'Please enter a valid US phone number', type:'error' });
+      setAlert({ visible:true, title:'Error', message:`Please enter at least ${selectedCountry.minDigits} digits for ${selectedCountry.name}`, type:'error' });
       return;
     }
+
+    // For linking mode, ensure user is signed in
+    if (mode === 'link' && !isSignedIn) {
+      setAlert({
+        visible: true,
+        title: 'Not Signed In',
+        message: 'You must be signed in before linking a phone number. Please sign in first.',
+        type: 'error'
+      });
+      return;
+    }
+
+    const phoneE164 = getE164Phone();
+
     setSending(true);
     try {
-      // Check if this is test phone (TestFlight) - bypass Twilio
+      // Check if this is test phone (TestFlight) - bypass CDP
       if (phoneE164 === TEST_ACCOUNTS.phone) {
-        console.log('🧪 Test phone detected, skipping Twilio SMS');
+        console.log(`🧪 Test phone detected, skipping CDP SMS (mode: ${mode})`);
 
         // Navigate directly to code screen
         router.push({
           pathname: '/phone-code',
-          params: { phone: phoneE164 }
+          params: { phone: phoneE164, mode }
         });
         return;
       }
 
-      // Real phone verification flow (auth handled by authenticatedFetch)
-      console.log('📤 [SMS Start] Sending authenticated request to backend');
+      // Real phone verification flow via CDP
+      console.log(`📤 [SMS] Starting ${mode} flow for phone`);
+      console.log('Debug info:', {
+        phoneE164,
+        isSignedIn,
+        mode,
+        linkSmsType: typeof linkSms,
+        signInWithSmsType: typeof signInWithSms,
+        hasCurrentUser: !!currentUser,
+        userId: currentUser?.userId
+      });
 
-      const r = await authenticatedFetch(`${BASE_URL}/auth/sms/start`, {
-        method:'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ phone: phoneE164 }) // Send E164 format
-      }).then(res => res.json());
+      let result;
+      try {
+        if (mode === 'signin' || mode === 'reverify') {
+          // Use signInWithSms for both signin and reverify
+          // For reverify: sends OTP to already-linked phone without creating new session
+          console.log(`Calling signInWithSms (${mode}) with:`, { phoneNumber: phoneE164 });
+          result = await signInWithSms({ phoneNumber: phoneE164 });
+        } else {
+          console.log('Calling linkSms with:', phoneE164);
+          result = await linkSms(phoneE164); // linkSms takes string directly
+        }
+      } catch (authError: any) {
+        // Handle "already authenticated" error - sign out and let user retry manually
+        if (authError.message?.toLowerCase().includes('already authenticated')) {
+          console.error('❌ [PHONE-VERIFY] Already authenticated error - signing out user');
 
-      if (r.error) throw new Error(r.error);
+          // Automatically sign out and show helpful message
+          try {
+            await signOut();
+            console.log('✅ [PHONE-VERIFY] Signed out successfully');
+          } catch (signOutError) {
+            console.error('❌ [PHONE-VERIFY] Failed to sign out:', signOutError);
+          }
 
-      console.log('✅ [SMS Start] SMS sent successfully');
+          // Show user-friendly error with guidance
+          const friendlyError: any = new Error('You were already signed in. We\'ve signed you out.\n\nPlease tap "Continue" again to send a new verification code.');
+          friendlyError.code = 'AUTO_SIGNED_OUT';
+          throw friendlyError;
+        } else {
+          throw authError; // Re-throw if not the expected error
+        }
+      }
+
+      console.log('Result from CDP:', result);
+
+      console.log(`✅ [SMS] ${mode} SMS sent successfully`);
 
       // Navigate to code verification page
       router.push({
         pathname: '/phone-code',
-        params: { phone: phoneE164 }
+        params: { phone: phoneE164, flowId: result.flowId, mode }
       });
-    } catch (e:any) {
-      console.error('❌ [SMS Start] Error:', e.message);
-      setAlert({ visible:true, title:'Error', message:e.message || 'Failed to send SMS', type:'error' });
-    } finally { setSending(false); }
+    } catch (e: any) {
+      console.error(`❌ [SMS] ${mode} error:`, e);
+      console.error('Error type:', typeof e);
+      console.error('Error constructor:', e?.constructor?.name);
+      console.error('Error details:', {
+        message: e.message,
+        code: e.code,
+        status: e.status,
+        statusCode: e.statusCode,
+        stack: e.stack,
+        cause: e.cause,
+        response: e.response,
+        data: e.data
+      });
+
+      // Try to log the original error if it's wrapped
+      if (e.cause) {
+        console.error('Original error cause:', e.cause);
+      }
+      if (e.response) {
+        console.error('Response data:', e.response);
+      }
+
+      // Handle METHOD_ALREADY_LINKED - phone already linked to this user
+      if (e.code === 'METHOD_ALREADY_LINKED') {
+        console.log('✅ Phone already linked to your account');
+        setAlert({
+          visible: true,
+          title: 'Already Linked',
+          message: 'This phone number is already linked to your account.',
+          type: 'info'
+        });
+        // Navigate back after acknowledgment
+        setTimeout(() => router.back(), 2000);
+        return;
+      }
+
+      // Handle ACCOUNT_EXISTS - phone linked to different account
+      if (e.code === 'ACCOUNT_EXISTS') {
+        setAlert({
+          visible: true,
+          title: mode === 'signin' ? 'Sign In Instead?' : 'Phone Already Used',
+          message: mode === 'signin'
+            ? 'This phone number is already associated with another account. Would you like to sign in with that account instead?'
+            : 'This phone number is associated with another account. Please use a different number or sign in with that account.',
+          type: 'error'
+        });
+        return;
+      }
+
+      // Build comprehensive error message with all available details
+      let errorMessage = e.message || 'Failed to send SMS';
+
+      // Add all error properties to the message for TestFlight debugging
+      const errorDetails: string[] = [];
+
+      if (e.code) errorDetails.push(`Code: ${e.code}`);
+      if (e.status) errorDetails.push(`Status: ${e.status}`);
+      if (e.statusCode) errorDetails.push(`Status Code: ${e.statusCode}`);
+      if (e.correlationId) errorDetails.push(`Correlation ID: ${e.correlationId}`);
+      if (e.requestId) errorDetails.push(`Request ID: ${e.requestId}`);
+      if (e.errorId) errorDetails.push(`Error ID: ${e.errorId}`);
+      if (e.type) errorDetails.push(`Type: ${e.type}`);
+      if (e.name && e.name !== 'Error') errorDetails.push(`Name: ${e.name}`);
+
+      // Try to stringify the entire error object to catch any additional fields
+      try {
+        const errorJson = JSON.stringify(e, null, 2);
+        if (errorJson !== '{}') {
+          errorDetails.push(`\nFull Error Object:\n${errorJson}`);
+        }
+      } catch (jsonError) {
+        // If JSON.stringify fails, try to get enumerable properties
+        const props = Object.keys(e);
+        if (props.length > 0) {
+          errorDetails.push(`\nError Properties: ${props.join(', ')}`);
+        }
+      }
+
+      if (errorDetails.length > 0) {
+        errorMessage += '\n\n' + errorDetails.join('\n');
+      }
+
+      // Generic error with full details
+      setAlert({
+        visible: true,
+        title: 'Error',
+        message: errorMessage,
+        type: 'error'
+      });
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleBack = () => {
     clearPendingForm();
     markPhoneVerifyCanceled();
-    router.back();
+
+    // If in re-verify mode and user is not signed in (they signed out),
+    // navigate to home instead of back (prevents getting stuck in navigation stack)
+    if (mode === 'reverify' && !isSignedIn) {
+      console.log('🔙 [PHONE-VERIFY] Re-verify canceled after sign out - returning to home');
+      router.replace('/(tabs)');
+      return;
+    }
+
+    // Check if we can actually go back (there's a previous screen)
+    // If not, navigate to home instead
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      console.log('🔙 [PHONE-VERIFY] No previous screen - navigating to home');
+      router.replace('/(tabs)');
+    }
   };
 
   return (
@@ -150,23 +309,45 @@ export default function PhoneVerifyScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.stepContainer}>
-            <Text style={styles.title}>What's your phone number?</Text>
+            <Text style={styles.title}>
+              {mode === 'signin' ? 'Sign in with phone' : mode === 'reverify' ? 'Re-verify your phone' : 'Link your phone number'}
+            </Text>
             <Text style={styles.subtitle}>
-              We'll text you a code. We keep your number private and won't send spam.
+              {mode === 'signin'
+                ? "We'll text you a code to sign in. Standard message rates may apply."
+                : mode === 'reverify'
+                ? "We'll text you a code to verify you still have access to this phone. This is required for Apple Pay checkout."
+                : "We'll text you a code to link your phone. This is required for Apple Pay checkout."}
             </Text>
 
+            {!selectedCountry.applePayCompatible && (mode === 'link' || mode === 'reverify') && (
+              <View style={styles.warningBox}>
+                <Ionicons name="information-circle" size={20} color="#FFA500" />
+                <Text style={styles.warningText}>
+                  Only US phone numbers work with Apple Pay checkout. Other countries can use alternative payment methods.
+                </Text>
+              </View>
+            )}
+
             <View style={styles.phoneInputContainer}>
-              <Text style={styles.countryCode}>🇺🇸 +1</Text>
+              <Pressable
+                onPress={() => setCountryPickerVisible(true)}
+                style={styles.countryButton}
+                disabled={sending}
+              >
+                <Text style={styles.flagEmoji}>{selectedCountry.flag}</Text>
+                <Text style={styles.countryCode}>{selectedCountry.code}</Text>
+                <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+              </Pressable>
               <TextInput
                 style={styles.phoneInput}
-                value={phoneDisplay}
+                value={phoneNumber}
                 onChangeText={handlePhoneChange}
-                placeholder="(201) 555-0123"
+                placeholder={`Phone number`}
                 placeholderTextColor={TEXT_SECONDARY}
                 keyboardType="phone-pad"
                 editable={!sending}
                 autoFocus
-                maxLength={14}
               />
             </View>
 
@@ -192,6 +373,42 @@ export default function PhoneVerifyScreen() {
         type={alert.type}
         onConfirm={() => setAlert(a => ({ ...a, visible:false }))}
       />
+
+      {/* Country Picker Modal */}
+      {countryPickerVisible && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Country</Text>
+              <Pressable onPress={() => setCountryPickerVisible(false)}>
+                <Ionicons name="close" size={28} color={TEXT_PRIMARY} />
+              </Pressable>
+            </View>
+            <ScrollView style={styles.countryList}>
+              {SUPPORTED_COUNTRIES.map((country) => (
+                <Pressable
+                  key={country.code + country.name}
+                  style={[
+                    styles.countryItem,
+                    selectedCountry.code === country.code && selectedCountry.name === country.name && styles.selectedCountryItem
+                  ]}
+                  onPress={() => {
+                    setSelectedCountry(country);
+                    setCountryPickerVisible(false);
+                  }}
+                >
+                  <Text style={styles.countryItemFlag}>{country.flag}</Text>
+                  <Text style={styles.countryItemName}>{country.name}</Text>
+                  <Text style={styles.countryItemCode}>{country.code}</Text>
+                  {country.applePayCompatible && (
+                    <Text style={styles.applePayBadge}>Apple Pay ✓</Text>
+                  )}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -240,6 +457,23 @@ const styles = StyleSheet.create({
     marginBottom: 40,
     paddingHorizontal: 20,
   },
+  warningBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 165, 0, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 165, 0, 0.3)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 24,
+    gap: 8,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#FFA500',
+    lineHeight: 18,
+  },
   phoneInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -252,14 +486,22 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     width: '100%',
   },
+  countryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 12,
+    marginRight: 12,
+    borderRightWidth: 1,
+    borderRightColor: BORDER,
+  },
   flagEmoji: {
     fontSize: 24,
-    marginRight: 12,
+    marginRight: 8,
   },
   countryCode: {
     fontSize: 18,
     color: TEXT_PRIMARY,
-    marginRight: 12,
+    marginRight: 4,
     fontWeight: '500',
   },
   phoneInput: {
@@ -288,5 +530,69 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.5,
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: DARK_BG,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '70%',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: BORDER,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: TEXT_PRIMARY,
+  },
+  countryList: {
+    flex: 1,
+  },
+  countryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  selectedCountryItem: {
+    backgroundColor: CARD_BG,
+  },
+  countryItemFlag: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  countryItemName: {
+    flex: 1,
+    fontSize: 16,
+    color: TEXT_PRIMARY,
+  },
+  countryItemCode: {
+    fontSize: 16,
+    color: TEXT_SECONDARY,
+    marginRight: 8,
+  },
+  applePayBadge: {
+    fontSize: 12,
+    color: '#34C759',
+    fontWeight: '600',
   },
 });

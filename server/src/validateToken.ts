@@ -4,7 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 // TestFlight account constants (matches /constants/TestAccounts.ts)
 const TESTFLIGHT_EMAIL = 'reviewer@coinbase-demo.app';
 const TESTFLIGHT_PHONE = '+12345678901';
-const TESTFLIGHT_USER_ID = 'f5ad4b85-368d-4ab5-a1b6-4f63fb1aab85';
+const TESTFLIGHT_USER_ID = '286ef934-f3b8-4e94-b61f-1f1a088ac95e';
 
 // Cache validated tokens to reduce API calls
 const tokenCache = new Map<string, { userId: string, expiresAt: number }>();
@@ -88,6 +88,9 @@ export async function validateAccessToken(
     const userEmail = userData.authenticationMethods[0]?.email || 'unknown';
     console.log('✅ [AUTH] Token validated (fresh) for user:', userEmail);
 
+    // Check if this is a TestFlight test account by email
+    const isTestAccount = userEmail === TESTFLIGHT_EMAIL || userEmail === 'devtest@coinbase-demo.app';
+
     // Cache the result
     tokenCache.set(token as string, {
       userId: userData.userId,
@@ -96,7 +99,14 @@ export async function validateAccessToken(
 
     // Add user info to request
     req.userId = userData.userId;
-    req.userData = userData;
+    req.userData = {
+      ...userData,
+      testAccount: isTestAccount // Mark as test account if email matches
+    };
+
+    if (isTestAccount) {
+      console.log('🧪 [AUTH] TestFlight email detected:', userEmail);
+    }
 
     next();
   } catch (error) {

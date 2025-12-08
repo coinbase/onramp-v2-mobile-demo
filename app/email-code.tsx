@@ -1,4 +1,4 @@
-import { useCurrentUser, useIsInitialized, useSignInWithEmail, useVerifyEmailOTP } from '@coinbase/cdp-hooks';
+import { useCurrentUser, useIsInitialized, useSignInWithEmail, useVerifyEmailOTP, useLinkEmail } from '@coinbase/cdp-hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -16,7 +16,8 @@ export default function EmailCodeScreen() {
   const params = useLocalSearchParams();
   const email = params.email as string;
   const flowId = params.flowId as string;
-  
+  const mode = (params.mode as 'signin' | 'link') || 'signin'; // Default to signin for new flow
+
   const [otp, setOtp] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [sending, setSending] = useState(false);
@@ -25,8 +26,10 @@ export default function EmailCodeScreen() {
     visible:false, title:'', message:'', type:'info'
   });
 
+  // CDP hooks - use different hook based on mode (use same verify hook for both)
   const { signInWithEmail } = useSignInWithEmail();
   const { verifyEmailOTP } = useVerifyEmailOTP();
+  const { linkEmail } = useLinkEmail();
   const { currentUser } = useCurrentUser();
   const { isInitialized } = useIsInitialized();
 
@@ -39,21 +42,51 @@ export default function EmailCodeScreen() {
   }, [resendSeconds]);
 
   const resendCode = async () => {
+    // Skip resend for test accounts
+    if (isTestAccount(email)) {
+      setResendSeconds(RESEND_SECONDS);
+      return;
+    }
+
     setSending(true);
     try {
-      const result = await signInWithEmail({ email });
+      console.log(`📤 [Email Resend] Resending code for ${mode} flow`);
+
+      let result;
+      if (mode === 'signin') {
+        result = await signInWithEmail({ email });
+      } else {
+        result = await linkEmail(email); // linkEmail takes string directly
+      }
+
+      console.log('✅ [Email Resend] Email sent successfully');
       setResendSeconds(RESEND_SECONDS);
-    } catch (e:any) {
-      setAlert({ visible:true, title:'Error', message:e.message || 'Failed to resend email', type:'error' });
-    } finally { setSending(false); }
+    } catch (e: any) {
+      console.error('❌ [Email Resend] Error:', e);
+
+      // Handle METHOD_ALREADY_LINKED - already linked, just reset timer
+      if (e.code === 'METHOD_ALREADY_LINKED') {
+        setResendSeconds(RESEND_SECONDS);
+        return;
+      }
+
+      setAlert({
+        visible: true,
+        title: 'Error',
+        message: e.message || 'Failed to resend email',
+        type: 'error'
+      });
+    } finally {
+      setSending(false);
+    }
   };
 
   const verifyEmail = async () => {
     if (!flowId || !otp) return;
     setVerifying(true);
     try {
-      // Check if this is a test account (TestFlight)
-      if (isTestAccount(email)) {
+      // Check if this is a test account (TestFlight) - only for signin mode
+      if (isTestAccount(email) && mode === 'signin') {
         console.log('🧪 Test account detected, activating mock session');
 
         // Verify OTP matches
@@ -65,13 +98,11 @@ export default function EmailCodeScreen() {
         await setTestSession(TEST_ACCOUNTS.wallets.evm, TEST_ACCOUNTS.wallets.solana);
         setCurrentWalletAddress(TEST_ACCOUNTS.wallets.evm);
         setCurrentSolanaAddress(TEST_ACCOUNTS.wallets.solana);
-        // Note: NOT forcing sandbox - let reviewer test production flow
-        // Transaction will fail at payment anyway (no real payment method)
 
         setAlert({
           visible: true,
           title: 'TestFlight Mode',
-          message: `Welcome, TestFlight Reviewer!\n\nTest Credentials:\n• Email: ${TEST_ACCOUNTS.email}\n• OTP: ${TEST_ACCOUNTS.otp}\n• Phone: ${TEST_ACCOUNTS.phone}\n• SMS Code: ${TEST_ACCOUNTS.smsCode}\n\nYou can test the full production flow without going through with any payment.`,
+          message: `Welcome, TestFlight Reviewer!\n\nTest Credentials:\n• Email: ${TEST_ACCOUNTS.email}\n• OTP: ${TEST_ACCOUNTS.otp}\n• Phone: ${TEST_ACCOUNTS.phone}\n• SMS Code: ${TEST_ACCOUNTS.smsCode}\n\nYou can test the full production flow without payment.`,
           type: 'info'
         });
 
@@ -80,30 +111,87 @@ export default function EmailCodeScreen() {
         return;
       }
 
-      // Real account flow
-      console.log('Starting email OTP verification...');
+      // Real account flow via CDP
+      console.log(`📤 [Email Verify] Verifying ${mode} flow`);
+
+      // Use same verification hook for both signin and link
       await verifyEmailOTP({ flowId, otp });
-      console.log('Email OTP verification completed');
 
-      // Wait for CDP to finish wallet initialization using proper hook
-      console.log('Waiting for wallet creation...');
-      const maxWaitTime = 10000; // 10 second timeout
-      const startTime = Date.now();
+      if (mode === 'signin') {
+        // Sign in with email - creates wallet
+        // Wait for CDP to finish wallet initialization
+        console.log('⏳ Waiting for wallet creation...');
+        const maxWaitTime = 10000; // 10 second timeout
+        const startTime = Date.now();
 
-      while (!isInitialized) {
-        if (Date.now() - startTime > maxWaitTime) {
-          console.warn('Wallet initialization timeout - navigating anyway');
-          break;
+        while (!isInitialized) {
+          if (Date.now() - startTime > maxWaitTime) {
+            console.warn('⚠️ Wallet initialization timeout - navigating anyway');
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 200)); // Check every 200ms
         }
-        await new Promise(resolve => setTimeout(resolve, 200)); // Check every 200ms
-      }
 
-      console.log('Wallet initialized, navigating back to profile...');
-      router.dismissAll();
-    } catch (e:any) {
-      console.error('Verification failed:', e);
-      setAlert({ visible:true, title:'Error', message:e.message || 'Verification failed', type:'error' });
-    } finally { setVerifying(false); }
+        // Register push notifications after successful sign-in
+        console.log('✅ Email sign-in successful, wallet ready');
+
+        // Send ping FIRST to confirm we reached this code (visible in Vercel logs)
+        fetch(`${process.env.EXPO_PUBLIC_BASE_URL}/push-tokens/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'email-code-signin',
+            hasCurrentUser: !!currentUser,
+            userId: currentUser?.userId,
+            timestamp: new Date().toISOString()
+          })
+        }).catch(() => {});
+
+        // Wait a moment for currentUser to be available
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Register push token now that user is signed in
+        const { registerForPushNotifications, sendPushTokenToServer } = await import('@/utils/pushNotifications');
+        const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
+
+        try {
+          const result = await registerForPushNotifications();
+          if (result && currentUser?.userId) {
+            console.log('📱 [EMAIL-CODE] Registering push token after sign-in:', currentUser.userId);
+            await sendPushTokenToServer(result.token, currentUser.userId, getAccessTokenGlobal, result.type);
+          } else {
+            console.log('⚠️ [EMAIL-CODE] No push token result:', { hasResult: !!result, hasUserId: !!currentUser?.userId });
+          }
+        } catch (pushError) {
+          console.error('⚠️ [EMAIL-CODE] Push registration failed (non-blocking):', pushError);
+        }
+
+        router.dismissAll();
+      } else {
+        // Link email to existing account
+        console.log('✅ Email linked successfully');
+
+        // Show success message
+        setAlert({
+          visible: true,
+          title: 'Email Verified',
+          message: 'Your email address has been linked to your account.',
+          type: 'success'
+        });
+
+        setTimeout(() => router.dismissAll(), 1500);
+      }
+    } catch (e: any) {
+      console.error(`❌ [Email Verify] ${mode} error:`, e);
+      setAlert({
+        visible: true,
+        title: 'Verification Failed',
+        message: e.message || 'Invalid code. Please try again.',
+        type: 'error'
+      });
+    } finally {
+      setVerifying(false);
+    }
   };
 
   return (
@@ -124,9 +212,13 @@ export default function EmailCodeScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.stepContainer}>
-            <Text style={styles.title}>Check your email</Text>
+            <Text style={styles.title}>
+              {mode === 'signin' ? 'Check your email' : 'Link your email'}
+            </Text>
             <Text style={styles.subtitle}>
-              Please enter the verification code we sent to {email}
+              {mode === 'signin'
+                ? `Please enter the verification code we sent to ${email}`
+                : `Please enter the verification code we sent to ${email} to link this email.`}
             </Text>
 
             <View style={styles.codeInputContainer}>

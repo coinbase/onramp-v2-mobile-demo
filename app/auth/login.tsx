@@ -9,6 +9,7 @@
 import { COLORS } from '@/constants/Colors';
 import { isTestSessionActive } from '@/utils/sharedState';
 import { useIsSignedIn } from '@coinbase/cdp-hooks';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
@@ -39,9 +40,18 @@ export default function LoginScreen() {
     }
   }, [isSignedIn, testSession]);
 
-  const handleConnect = () => {
-    // Navigate to email verification flow
-    router.push('/email-verify');
+  const handleEmailLogin = () => {
+    router.push({
+      pathname: '/email-verify',
+      params: { mode: 'signin' }
+    });
+  };
+
+  const handlePhoneLogin = () => {
+    router.push({
+      pathname: '/phone-verify',
+      params: { mode: 'signin' }
+    });
   };
 
   // TestFlight loading state
@@ -73,19 +83,35 @@ export default function LoginScreen() {
         <Text style={styles.title}>Onramp V2 Demo</Text>
         <Text style={styles.subtitle}>
           Buy crypto with your wallet{'\n'}
-          Powered by Coinbase Developer Platform Embedded Wallet
+          Powered by Coinbase Developer Platform
         </Text>
 
-        {/* Connect Button */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.connectButton,
-            pressed && { opacity: 0.85 }
-          ]}
-          onPress={handleConnect}
-        >
-          <Text style={styles.connectButtonText}>Login to Connect Wallet</Text>
-        </Pressable>
+        {/* Auth Method Selection */}
+        <View style={styles.authButtonsContainer}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.authButton,
+              styles.primaryAuthButton,
+              pressed && { opacity: 0.85 }
+            ]}
+            onPress={handleEmailLogin}
+          >
+            <Ionicons name="mail-outline" size={24} color={WHITE} style={styles.buttonIcon} />
+            <Text style={styles.authButtonText}>Continue with Email</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.authButton,
+              styles.secondaryAuthButton,
+              pressed && { opacity: 0.85 }
+            ]}
+            onPress={handlePhoneLogin}
+          >
+            <Ionicons name="call-outline" size={24} color={BLUE} style={styles.buttonIcon} />
+            <Text style={styles.secondaryAuthButtonText}>Continue with Phone</Text>
+          </Pressable>
+        </View>
 
         {/* Footer */}
         <View style={styles.footer}>
@@ -129,21 +155,42 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 64,
   },
-  connectButton: {
-    backgroundColor: BLUE,
-    paddingHorizontal: 48,
+  authButtonsContainer: {
+    width: '100%',
+    gap: 16,
+  },
+  authButton: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
     paddingVertical: 18,
     borderRadius: 30,
-    minWidth: 280,
+    width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryAuthButton: {
+    backgroundColor: BLUE,
     shadowColor: BLUE,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
   },
-  connectButtonText: {
+  secondaryAuthButton: {
+    backgroundColor: CARD_BG,
+    borderWidth: 2,
+    borderColor: BLUE,
+  },
+  buttonIcon: {
+    marginRight: 12,
+  },
+  authButtonText: {
     color: WHITE,
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  secondaryAuthButtonText: {
+    color: BLUE,
     fontSize: 18,
     fontWeight: '600',
   },

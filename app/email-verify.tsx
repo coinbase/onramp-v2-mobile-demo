@@ -1,4 +1,4 @@
-import { useSignInWithEmail } from '@coinbase/cdp-hooks';
+import { useSignInWithEmail, useLinkEmail, useIsSignedIn } from '@coinbase/cdp-hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -12,14 +12,18 @@ export default function EmailVerifyScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const initialEmail = params.initialEmail as string || '';
-  
+  const mode = (params.mode as 'signin' | 'link') || 'signin'; // Default to signin for new flow
+
   const [email, setEmail] = useState(initialEmail);
   const [sending, setSending] = useState(false);
   const [alert, setAlert] = useState<{visible:boolean; title:string; message:string; type:'success'|'error'|'info'}>({
     visible:false, title:'', message:'', type:'info'
   });
 
+  // CDP hooks - use different hook based on mode
   const { signInWithEmail } = useSignInWithEmail();
+  const { linkEmail } = useLinkEmail();
+  const { isSignedIn } = useIsSignedIn();
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -28,18 +32,75 @@ export default function EmailVerifyScreen() {
       setAlert({ visible:true, title:'Error', message:'Please enter a valid email address', type:'error' });
       return;
     }
+
+    // For linking mode, ensure user is signed in
+    if (mode === 'link' && !isSignedIn) {
+      setAlert({
+        visible: true,
+        title: 'Not Signed In',
+        message: 'You must be signed in before linking an email address. Please sign in first.',
+        type: 'error'
+      });
+      return;
+    }
+
     setSending(true);
     try {
-      const result = await signInWithEmail({ email });
-      
+      console.log(`📤 [Email] Starting ${mode} flow`);
+
+      let result;
+      if (mode === 'signin') {
+        result = await signInWithEmail({ email });
+      } else {
+        result = await linkEmail(email); // linkEmail takes string directly
+      }
+
+      console.log(`✅ [Email] ${mode} email sent successfully`);
+
       // Navigate to code verification page
       router.push({
         pathname: '/email-code',
-        params: { email, flowId: result.flowId }
+        params: { email, flowId: result.flowId, mode }
       });
-    } catch (e:any) {
-      setAlert({ visible:true, title:'Error', message:e.message || 'Failed to send email', type:'error' });
-    } finally { setSending(false); }
+    } catch (e: any) {
+      console.error(`❌ [Email] ${mode} error:`, e);
+
+      // Handle METHOD_ALREADY_LINKED - email already linked to this user
+      if (e.code === 'METHOD_ALREADY_LINKED') {
+        console.log('✅ Email already linked to your account');
+        setAlert({
+          visible: true,
+          title: 'Already Linked',
+          message: 'This email address is already linked to your account.',
+          type: 'info'
+        });
+        setTimeout(() => router.back(), 2000);
+        return;
+      }
+
+      // Handle ACCOUNT_EXISTS - email linked to different account
+      if (e.code === 'ACCOUNT_EXISTS') {
+        setAlert({
+          visible: true,
+          title: mode === 'signin' ? 'Sign In Instead?' : 'Email Already Used',
+          message: mode === 'signin'
+            ? 'This email is already associated with another account. Would you like to sign in with that account instead?'
+            : 'This email is associated with another account. Please use a different email or sign in with that account.',
+          type: 'error'
+        });
+        return;
+      }
+
+      // Generic error
+      setAlert({
+        visible: true,
+        title: 'Error',
+        message: e.message || 'Failed to send email',
+        type: 'error'
+      });
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -61,9 +122,13 @@ export default function EmailVerifyScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.stepContainer}>
-            <Text style={styles.title}>What's your email?</Text>
+            <Text style={styles.title}>
+              {mode === 'signin' ? 'Sign in with email' : 'Link your email'}
+            </Text>
             <Text style={styles.subtitle}>
-              We'll send you a verification code to create your embedded wallet.
+              {mode === 'signin'
+                ? "We'll send you a verification code to sign in and access your wallet."
+                : "We'll send you a verification code to link your email. This is required for Apple Pay checkout."}
             </Text>
 
             <View style={styles.emailInputContainer}>
