@@ -88,6 +88,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PHONE_KEY = 'verifiedPhone';
 const PHONE_AT_KEY = 'verifiedPhoneAt';
+const PHONE_USER_KEY = 'verifiedPhoneUserId'; // Track which user verified this phone
 export const PHONE_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
 
 let currentPartnerUserRef: string | null = null;
@@ -96,6 +97,7 @@ let currentSolanaAddress: string | null = null;
 
 let verifiedPhone: string | null = null;
 let verifiedPhoneAt: number | null = null;
+let verifiedPhoneUserId: string | null = null; // Track which user verified this phone
 
 let currentCountry: string = 'US';
 let currentSubdivision: string = 'CA';
@@ -278,24 +280,32 @@ export const getCurrentWalletAddress = () => {
   }
 };
 
-export const setVerifiedPhone = async (phone: string | null) => {
+export const setVerifiedPhone = async (phone: string | null, userId?: string) => {
   verifiedPhone = phone;
   verifiedPhoneAt = phone ? Date.now() : null;
+  verifiedPhoneUserId = userId || null;
   if (phone) {
-    await AsyncStorage.multiSet([[PHONE_KEY, phone], [PHONE_AT_KEY, String(verifiedPhoneAt)]]);
+    await AsyncStorage.multiSet([
+      [PHONE_KEY, phone],
+      [PHONE_AT_KEY, String(verifiedPhoneAt)],
+      [PHONE_USER_KEY, userId || '']
+    ]);
   } else {
-    await AsyncStorage.multiRemove([PHONE_KEY, PHONE_AT_KEY]);
+    verifiedPhoneUserId = null;
+    await AsyncStorage.multiRemove([PHONE_KEY, PHONE_AT_KEY, PHONE_USER_KEY]);
   }
 };
 
 export const hydrateVerifiedPhone = async () => {
-  const [p, at] = await AsyncStorage.multiGet([PHONE_KEY, PHONE_AT_KEY]);
+  const [p, at, userId] = await AsyncStorage.multiGet([PHONE_KEY, PHONE_AT_KEY, PHONE_USER_KEY]);
   verifiedPhone = p?.[1] || null;
   verifiedPhoneAt = at?.[1] ? Number(at[1]) : null;
+  verifiedPhoneUserId = userId?.[1] || null;
 };
 
 export const getVerifiedPhone = () => verifiedPhone;
 export const getVerifiedPhoneAt = () => verifiedPhoneAt;
+export const getVerifiedPhoneUserId = () => verifiedPhoneUserId;
 
 export const isPhoneFresh60d = () => {
   if (!verifiedPhoneAt) return false;
@@ -303,6 +313,15 @@ export const isPhoneFresh60d = () => {
 };
 
 export const phoneExpiry = () => (verifiedPhoneAt ? new Date(verifiedPhoneAt + PHONE_TTL_MS) : null);
+
+// Developer tool: Force unverify phone for testing
+export const forceUnverifyPhone = async () => {
+  verifiedPhone = null;
+  verifiedPhoneAt = null;
+  verifiedPhoneUserId = null;
+  await AsyncStorage.multiRemove([PHONE_KEY, PHONE_AT_KEY, PHONE_USER_KEY]);
+  console.log('🔧 [DEV] Phone verification forcefully cleared');
+};
 export const daysUntilExpiry = () => {
   if (!verifiedPhoneAt) return -1;
   const rem = verifiedPhoneAt + PHONE_TTL_MS - Date.now();
@@ -311,26 +330,90 @@ export const daysUntilExpiry = () => {
 
 export const formatPhoneDisplay = (phone: string | null): string => {
   if (!phone) return '';
-  
-  // Remove all non-digits
-  const digits = phone.replace(/\D/g, '');
-  
-  // Handle +1 prefix (US numbers are 11 digits total)
-  if (digits.length === 11 && digits.startsWith('1')) {
-    const areaCode = digits.slice(1, 4);
-    const exchange = digits.slice(4, 7);
-    const number = digits.slice(7, 11);
-    return `+1 (${areaCode}) ${exchange}-${number}`;
+
+  // Import phone countries from shared constants
+  const { PHONE_COUNTRIES } = require('../constants/PhoneCountries');
+
+  // Check if phone already has + prefix
+  if (!phone.startsWith('+')) {
+    // No prefix - assume US format for backward compatibility
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 10) {
+      const areaCode = digits.slice(0, 3);
+      const exchange = digits.slice(3, 6);
+      const number = digits.slice(6, 10);
+      return `+1 (${areaCode}) ${exchange}-${number}`;
+    }
+    return phone; // Fallback
   }
-  
-  // Handle 10-digit US numbers (add +1)
-  if (digits.length === 10) {
-    const areaCode = digits.slice(0, 3);
-    const exchange = digits.slice(3, 6);
-    const number = digits.slice(6, 10);
-    return `+1 (${areaCode}) ${exchange}-${number}`;
+
+  // Find matching country by checking if phone starts with the country code
+  // Sort by code length (descending) to match longer codes first (e.g., +971 before +97)
+  const sortedCountries = [...PHONE_COUNTRIES].sort((a, b) => b.code.length - a.code.length);
+  const country = sortedCountries.find(c => phone.startsWith(c.code));
+
+  if (!country) {
+    // Unknown country - return as-is
+    return phone;
   }
-  
-  // Fallback: return as-is if not a standard US format
-  return phone;
+
+  // Extract the local number (without country code)
+  const localNumber = phone.slice(country.code.length).replace(/\D/g, '');
+
+  // Format based on country
+  if (country.code === '+1') {
+    // US/Canada: +1 (XXX) XXX-XXXX
+    if (localNumber.length === 10) {
+      const areaCode = localNumber.slice(0, 3);
+      const exchange = localNumber.slice(3, 6);
+      const number = localNumber.slice(6, 10);
+      return `${country.flag} ${country.code} (${areaCode}) ${exchange}-${number}`;
+    }
+  } else if (country.code === '+65') {
+    // Singapore: +65 XXXX XXXX
+    if (localNumber.length === 8) {
+      const part1 = localNumber.slice(0, 4);
+      const part2 = localNumber.slice(4, 8);
+      return `${country.flag} ${country.code} ${part1} ${part2}`;
+    }
+  } else if (country.code === '+44') {
+    // UK: +44 XXXX XXXXXX
+    if (localNumber.length === 10) {
+      const part1 = localNumber.slice(0, 4);
+      const part2 = localNumber.slice(4);
+      return `${country.flag} ${country.code} ${part1} ${part2}`;
+    }
+  } else if (country.code === '+61') {
+    // Australia: +61 XXX XXX XXX
+    if (localNumber.length === 9) {
+      const part1 = localNumber.slice(0, 3);
+      const part2 = localNumber.slice(3, 6);
+      const part3 = localNumber.slice(6);
+      return `${country.flag} ${country.code} ${part1} ${part2} ${part3}`;
+    }
+  }
+
+  // Generic format for other countries: flag + code + number in groups
+  const groups: string[] = [];
+  if (localNumber.length <= 4) {
+    groups.push(localNumber);
+  } else if (localNumber.length <= 7) {
+    groups.push(localNumber.slice(0, 3));
+    groups.push(localNumber.slice(3));
+  } else if (localNumber.length <= 10) {
+    // Split into 3-3-4 or similar
+    const groupSize1 = Math.floor(localNumber.length / 3);
+    const groupSize2 = Math.floor((localNumber.length - groupSize1) / 2);
+    const groupSize3 = localNumber.length - groupSize1 - groupSize2;
+    groups.push(localNumber.slice(0, groupSize1));
+    groups.push(localNumber.slice(groupSize1, groupSize1 + groupSize2));
+    groups.push(localNumber.slice(groupSize1 + groupSize2));
+  } else {
+    // Very long: group by 4
+    for (let i = 0; i < localNumber.length; i += 4) {
+      groups.push(localNumber.slice(i, i + 4));
+    }
+  }
+
+  return `${country.flag} ${country.code} ${groups.join(' ')}`;
 };

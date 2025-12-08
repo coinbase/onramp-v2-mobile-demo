@@ -39,9 +39,9 @@ export default function History() {
   const { getAccessToken } = useGetAccessToken();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [currentUserRef, setCurrentUserRef] = useState<string | null>(null);
-  // const [nextPageKey, setNextPageKey] = useState<string | null>(null); // Add this
-  // const [currentPage, setCurrentPage] = useState(1); // Add this
+  const [nextPageKey, setNextPageKey] = useState<string | null>(null);
 
   const [alertState, setAlertState] = useState<{
     visible: boolean;
@@ -55,7 +55,7 @@ export default function History() {
     type: 'info'
   });
 
-  const loadTransactions = useCallback(async (pageKey?: string, isNewPage: boolean = false) => {
+  const loadTransactions = useCallback(async (pageKey?: string, append: boolean = false) => {
     // Use CDP userId or test account userId for TestFlight
     const isTestFlight = isTestSessionActive();
     const userId = isTestFlight ? TEST_ACCOUNTS.userId : currentUser?.userId;
@@ -65,12 +65,47 @@ export default function History() {
       return;
     }
 
+    console.log('🔍 [HISTORY] loadTransactions called:', {
+      pageKey,
+      append,
+      userId,
+      currentTxCount: transactions.length
+    });
+
     try {
-      setLoading(true);
+      // Set appropriate loading state
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+
       const accessToken = await getAccessToken();
-      const result = await fetchTransactionHistory(userId, pageKey, 50, accessToken || undefined);
-      setTransactions(result.transactions || []); // Replace for new page
-      // setNextPageKey(result.nextPageKey || null);
+      const result = await fetchTransactionHistory(userId, pageKey, 10, accessToken || undefined);
+
+      console.log('📊 [HISTORY] API result:', {
+        receivedTxCount: result.transactions?.length || 0,
+        hasNextPageKey: !!result.nextPageKey,
+        nextPageKeyValue: result.nextPageKey
+      });
+
+      if (append) {
+        // Append to existing transactions (infinite scroll)
+        setTransactions(prev => {
+          const newTxs = [...prev, ...(result.transactions || [])];
+          console.log('📝 [HISTORY] Appending transactions:', {
+            previousCount: prev.length,
+            newCount: newTxs.length
+          });
+          return newTxs;
+        });
+      } else {
+        // Replace transactions (initial load or refresh)
+        setTransactions(result.transactions || []);
+      }
+
+      setNextPageKey(result.nextPageKey || null);
+      console.log('✅ [HISTORY] nextPageKey updated to:', result.nextPageKey || 'null');
 
     } catch (error) {
       console.error("Failed to load transaction history:", error);
@@ -81,9 +116,13 @@ export default function History() {
         type: 'error'
       });
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
-  }, [currentUser?.userId, getAccessToken]);
+  }, [currentUser?.userId, getAccessToken, transactions.length]);
 
   useFocusEffect(
     useCallback(() => {
@@ -110,28 +149,26 @@ export default function History() {
     }
   }, [currentUser?.userId, loadTransactions]);
 
-  
+
   const handleRefresh = useCallback(() => {
     loadTransactions(); // Call without parameters for refresh
   }, [loadTransactions]);
 
-  // // Load next page
-  // const loadNextPage = useCallback(() => {
-  //   if (nextPageKey && !loading) {
-  //     setCurrentPage(prev => prev + 1);
-  //     loadTransactions(nextPageKey, true);
-  //   }
-  // }, [nextPageKey, loading, loadTransactions]);
+  const handleLoadMore = useCallback(() => {
+    console.log('🔄 [HISTORY] handleLoadMore triggered:', {
+      hasNextPageKey: !!nextPageKey,
+      nextPageKey,
+      loadingMore,
+      loading
+    });
 
-  // // Load previous page (you'd need to track page keys for this)
-  // const loadPreviousPage = useCallback(() => {
-  //   if (currentPage > 1) {
-  //     setCurrentPage(prev => prev - 1);
-  //     // For previous page, you'd need to store previous pageKeys
-  //     // For simplicity, let's just reload from start
-  //     loadTransactions(undefined, true);
-  //   }
-  // }, [currentPage, loadTransactions]);
+    if (nextPageKey && !loadingMore && !loading) {
+      console.log('✅ [HISTORY] Loading more transactions with pageKey:', nextPageKey);
+      loadTransactions(nextPageKey, true); // Append mode
+    } else {
+      console.log('⚠️ [HISTORY] Skipping load more - conditions not met');
+    }
+  }, [nextPageKey, loadingMore, loading, loadTransactions]);
 
   const getStatusColor = (status: string) => {
     const normalizedStatus = status.toLowerCase();
@@ -235,6 +272,24 @@ export default function History() {
             contentContainerStyle={styles.listContainer}
             showsVerticalScrollIndicator={false}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={() =>
+              loadingMore ? (
+                <View style={styles.footerLoader}>
+                  <ActivityIndicator size="small" color={BLUE} />
+                  <Text style={styles.footerText}>Loading more...</Text>
+                </View>
+              ) : nextPageKey ? (
+                <View style={styles.footerLoader}>
+                  <Text style={styles.footerText}>Scroll to load more</Text>
+                </View>
+              ) : transactions.length > 0 ? (
+                <View style={styles.footerLoader}>
+                  <Text style={styles.footerText}>No more transactions</Text>
+                </View>
+              ) : null
+            }
           />
         )}
           <CoinbaseAlert
@@ -500,5 +555,16 @@ const styles = StyleSheet.create({
   pageNumbersText: {
     color: TEXT_SECONDARY,
     fontSize: 14,
+  },
+  footerLoader: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+    textAlign: 'center',
   },
 });

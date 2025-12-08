@@ -1,19 +1,22 @@
 import express from 'express';
+import cors from 'cors';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 
 import { generateJwt } from '@coinbase/cdp-sdk/auth';
-import twilio from 'twilio';
 import { resolveClientIp } from './ip.js';
 import { validateAccessToken } from './validateToken.js';
 import { verifyLegacySignature, verifyWebhookSignature } from './verifyWebhookSignature.js';
 
-// Redis storage setup - use Redis for production, in-memory for local dev
-let redis: any = null;
-const useRedis = !!process.env.REDIS_URL;
-if (useRedis) {
+// Database storage setup - use external DB for production, in-memory for local dev
+let database: any = null;
+// Backwards compatibility: fallback to REDIS_URL if DATABASE_URL not set
+const databaseUrl = process.env.DATABASE_URL || process.env.REDIS_URL;
+const useDatabase = !!databaseUrl;
+if (useDatabase) {
   const { createClient } = await import('redis');
-  redis = await createClient({ url: process.env.REDIS_URL! }).connect();
-  console.log('✅ Using Redis for push token storage (production)');
+  database = await createClient({ url: databaseUrl! }).connect();
+  console.log('✅ Using external database for push token storage (production)');
 } else {
   console.log('ℹ️ Using in-memory storage for push tokens (local dev)');
 }
@@ -49,22 +52,61 @@ if (process.env.APNS_KEY_ID && process.env.APNS_TEAM_ID && process.env.APNS_KEY)
   console.log('ℹ️ Using Expo push service for notifications (dev)');
 }
 
-let twilioClient: ReturnType<typeof import('twilio')> | null = null;
-function getTwilio() {
-  if (!twilioClient) {
-    const sid = process.env.TWILIO_ACCOUNT_SID;
-    const token = process.env.TWILIO_AUTH_TOKEN;
-    if (!sid || !token) throw new Error('Twilio env not configured');
-    twilioClient = twilio(sid, token);
-  }
-  return twilioClient;
-}
-
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
 // On Vercel, trust proxy to read x-forwarded-for
 app.set('trust proxy', true);
+
+// Rate limiter for webhook endpoint (DoS protection)
+// Limits expensive operations (DB lookups, external API calls)
+// Note: Rate limiting applies to ALL requests. Signature verification happens
+// inside the route handler AFTER rate limiting to prevent bypass attacks.
+const webhookRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute window
+  max: 100, // Limit each IP to 100 requests per minute
+  message: { error: 'Too many webhook requests, please try again later' },
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  // Use IP address as the key
+  keyGenerator: (req) => {
+    // For webhooks from Coinbase, use x-forwarded-for if available
+    return req.ip || req.headers['x-forwarded-for'] as string || 'unknown';
+  }
+});
+
+// CORS Configuration - Prevent random websites from calling your API
+// Note: This does NOT affect:
+// - Mobile apps (React Native) - they don't send Origin header
+// - Webhooks (Coinbase servers) - server-to-server calls bypass CORS
+// - Postman/curl - non-browser clients bypass CORS
+const allowedOrigins = [
+  'http://localhost:8081',   // Expo dev server
+  'http://localhost:19000',  // Expo dev server (alternative)
+  'http://localhost:19006',  // Expo web
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [])
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, server-to-server like webhooks)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Allow if origin is in allowlist
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Block all other origins (random websites)
+    console.warn('⚠️ [CORS] Blocked request from unauthorized origin:', origin);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // For webhook signature verification, we need raw body
 // Use express.raw() for webhook routes before JSON parsing
@@ -89,8 +131,8 @@ app.get("/health", (_req, res) => {
 // 🔒 GLOBAL AUTHENTICATION MIDDLEWARE
 // All routes except /health and /webhooks require valid CDP access token
 app.use((req, res, next) => {
-  // Skip authentication for health check and webhooks only
-  if (req.path === '/health' || req.path.startsWith('/webhooks')) {
+  // Skip authentication for health check, webhooks, and debug endpoints
+  if (req.path === '/health' || req.path.startsWith('/webhooks') || req.path === '/push-tokens/ping') {
     return next();
   }
 
@@ -118,7 +160,7 @@ app.post("/server/api", async (req, res) => {
 
   try {
     const clientIp = await resolveClientIp(req);
-    
+
     // Validate the request structure
     const requestSchema = z.object({
       url: z.string(), // Must be a valid URL
@@ -134,24 +176,40 @@ app.post("/server/api", async (req, res) => {
 
     const { url: targetUrl, method: method, body: targetBody, headers: additionalHeaders } = parsed.data;
 
+    console.log('📤 [SERVER] Outgoing request:', {
+      url: targetUrl,
+      method: method || 'POST',
+      body: targetBody
+    });
+
 
     // Generate JWT for Coinbase API calls (if needed)
     const urlObj = new URL(targetUrl);
     let authToken = null;
 
     const isOnrampRequest = targetUrl.includes('/onramp/');
-    const finalBody = isOnrampRequest ? { ...targetBody, clientIp } : targetBody;
-    
-    console.log('finalBody', finalBody);
+
+    // Add clientIp to onramp requests
+    let finalBody = isOnrampRequest ? { ...targetBody, clientIp } : targetBody;
+    let finalUrl = targetUrl;
+
+    // Log if this is a test account (for debugging)
+    const isTestFlight = (req as any).userData?.testAccount === true;
+    if (isTestFlight) {
+      console.log('🧪 [SERVER] TestFlight account detected');
+    }
     
     // Auto-generate JWT for Coinbase API calls only
-    if (urlObj.hostname === "api.developer.coinbase.com" || urlObj.hostname === "api.cdp.coinbase.com") {
+    // Use finalUrl for JWT generation, but DON'T include query params in JWT signature
+    // Coinbase API expects JWT to only sign the pathname, not query string
+    const finalUrlObj = new URL(finalUrl);
+    if (finalUrlObj.hostname === "api.developer.coinbase.com" || finalUrlObj.hostname === "api.cdp.coinbase.com") {
       authToken = await generateJwt({
         apiKeyId: process.env.CDP_API_KEY_ID!,
         apiKeySecret: process.env.CDP_API_KEY_SECRET!,
         requestMethod: method || 'POST',
-        requestHost: urlObj.hostname,
-        requestPath: urlObj.pathname,
+        requestHost: finalUrlObj.hostname,
+        requestPath: finalUrlObj.pathname, // DO NOT include .search (query params) - Coinbase rejects it
         expiresIn: 120
       });
     }
@@ -164,21 +222,46 @@ app.post("/server/api", async (req, res) => {
     };
 
     // Forward request with authentication
-    const response = await fetch(targetUrl, {
+    const response = await fetch(finalUrl, {
       method: method || 'POST',
       headers: headers,
       ...(method === 'POST' && finalBody && { body: JSON.stringify(finalBody) })
     });
 
-    const data = await response.json();
-      
-    console.log('📤 Proxied request', {
-      url: targetUrl,
-      method: method || 'POST',
-      status: response.status,
-      ok: response.ok,
-      dataPreview: data ? JSON.stringify(data).slice(0, 700) : 'No data'
-    });
+    // Try to parse as JSON, but handle text responses gracefully
+    let data;
+    const contentType = response.headers.get('content-type');
+
+    try {
+      if (contentType?.includes('application/json')) {
+        data = await response.json();
+        console.log('📥 [SERVER] Response received:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: data
+        });
+      } else {
+        // Non-JSON response (likely error), get as text
+        const textResponse = await response.text();
+        console.log('📥 [SERVER] Non-JSON response:', {
+          status: response.status,
+          statusText: response.statusText,
+          text: textResponse
+        });
+
+        // Return text error as JSON
+        return res.status(response.status).json({
+          error: textResponse || 'Upstream API error',
+          status: response.status
+        });
+      }
+    } catch (parseError) {
+      console.error('Failed to parse response:', parseError);
+      return res.status(response.status).json({
+        error: 'Failed to parse upstream response',
+        status: response.status
+      });
+    }
 
     // Return the upstream response (preserve status code)
     res.status(response.status).json(data);
@@ -193,74 +276,108 @@ app.post("/server/api", async (req, res) => {
 });
 
 
-// Twilio SMS endpoints
-// Note: Authentication handled by global middleware above
-app.post('/auth/sms/start', async (req, res) => {
-  try {
-    const { phone } = req.body || {};
-    if (!phone) return res.status(400).json({ error: 'phone required' });
-
-    console.log('📱 [TWILIO] SMS start request - User:', req.userId, 'Phone:', phone);
-
-    const r = await getTwilio().verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID!)
-      .verifications.create({ to: phone, channel: 'sms' });
-
-    console.log('✅ [TWILIO] SMS sent successfully - Status:', r.status);
-    res.json({ status: r.status });
-  } catch (e: any) {
-    console.error('❌ [TWILIO] SMS start error:', e.message);
-    res.status(500).json({ error: e.message || 'twilio start error' });
-  }
-});
-
-app.post('/auth/sms/verify', async (req, res) => {
-  try {
-    const { phone, code } = req.body || {};
-    if (!phone || !code) return res.status(400).json({ error: 'phone and code required' });
-
-    console.log('🔐 [TWILIO] SMS verify request - User:', req.userId, 'Phone:', phone);
-
-    const r = await getTwilio().verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID!)
-      .verificationChecks.create({ to: phone, code });
-
-    console.log('✅ [TWILIO] SMS verification result - Status:', r.status, 'Valid:', r.valid);
-    return res.json({ status: r.status, valid: r.valid });
-  } catch (e:any) {
-    console.error('❌ [TWILIO] SMS verify error:', e.message);
-    return res.status(500).json({ error: e.message || 'twilio verify error' });
-  }
+// Zod schema for EVM balance query validation (SSRF protection)
+const evmBalanceQuerySchema = z.object({
+  address: z.string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid EVM address format'),
+  network: z.enum(['base', 'ethereum', 'base-sepolia', 'ethereum-sepolia'])
+    .default('base')
 });
 
 /**
  * EVM Token Balance Endpoint
  * GET /balances/evm?address=0x...&network=base
  *
- * Supported networks: base, ethereum (mainnet only)
+ * Supported networks: base, ethereum, base-sepolia (testnets)
  * Returns token balances with USD prices from Coinbase Price API
  */
 app.get('/balances/evm', async (req, res) => {
   try {
-    const { address, network = 'base' } = req.query;
+    // Validate and sanitize query parameters to prevent SSRF
+    const validationResult = evmBalanceQuerySchema.safeParse(req.query);
 
-    if (!address || typeof address !== 'string') {
-      return res.status(400).json({ error: 'address query parameter required' });
+    if (!validationResult.success) {
+      return res.status(400).json({
+        error: 'Invalid request parameters',
+        details: validationResult.error.issues
+      });
     }
 
-    if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
-      return res.status(400).json({ error: 'Invalid EVM address format' });
-    }
-
-    const validNetworks = ['base', 'ethereum'];
-    if (!validNetworks.includes(network as string)) {
-      return res.status(400).json({ error: `Invalid network. Supported: ${validNetworks.join(', ')}` });
-    }
+    const { address, network } = validationResult.data;
 
     console.log(`💰 [BALANCES] Fetching EVM balances - Address: ${address}, Network: ${network}`);
 
+    // Ethereum Sepolia uses v1 REST API with network name (not chain ID)
+    if (network === 'ethereum-sepolia') {
+      const balancesPath = `/platform/v1/networks/ethereum-sepolia/addresses/${address}/balances`;
+      const balancesUrl = `https://api.cdp.coinbase.com${balancesPath}`;
+
+      console.log(`🔗 [BALANCES] Ethereum Sepolia URL (v1 API): ${balancesUrl}`);
+
+      const authToken = await generateJwt({
+        apiKeyId: process.env.CDP_API_KEY_ID!,
+        apiKeySecret: process.env.CDP_API_KEY_SECRET!,
+        requestMethod: 'GET',
+        requestHost: 'api.cdp.coinbase.com',
+        requestPath: balancesPath,
+        expiresIn: 120
+      });
+
+      const balancesResponse = await fetch(balancesUrl, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+
+      console.log(`📡 [BALANCES] Response status: ${balancesResponse.status} ${balancesResponse.statusText}`);
+
+      if (!balancesResponse.ok) {
+        const errorText = await balancesResponse.text();
+        console.error('❌ [BALANCES] CDP API error response:', errorText);
+
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { message: errorText };
+        }
+
+        console.error('❌ [BALANCES] CDP API error details:', errorData);
+        return res.status(balancesResponse.status).json({
+          error: 'Failed to fetch Ethereum Sepolia balances from CDP',
+          details: errorData
+        });
+      }
+
+      const balancesData = await balancesResponse.json();
+      const balances = balancesData.data || [];
+
+      console.log(`✅ [BALANCES] Fetched ${balances.length} Ethereum Sepolia balances`);
+
+      // Transform v1 response to match v2 format
+      const transformedBalances = balances
+        .filter((b: any) => parseFloat(b.amount || '0') > 0)
+        .map((b: any) => ({
+          token: {
+            symbol: (b.asset?.asset_id || 'UNKNOWN').toUpperCase(), // asset_id is lowercase, convert to uppercase
+            contractAddress: b.asset?.contract_address || null,
+            name: b.asset?.name || null,
+          },
+          amount: {
+            amount: b.amount || '0',
+            decimals: String(b.asset?.decimals || '18'), // Ensure string format
+          },
+          usdValue: null,
+        }));
+
+      return res.json({
+        balances: transformedBalances,
+        totalBalances: transformedBalances.length
+      });
+    }
+
+    // For other networks (base, ethereum, base-sepolia), use v2 API
     const balancesPath = `/platform/v2/evm/token-balances/${network}/${address}`;
     const balancesUrl = `https://api.cdp.coinbase.com${balancesPath}`;
-
-    console.log(`🔗 [BALANCES] Full URL: ${balancesUrl}`);
 
     const authToken = await generateJwt({
       apiKeyId: process.env.CDP_API_KEY_ID!,
@@ -313,8 +430,6 @@ app.get('/balances/evm', async (req, res) => {
           if (symbol && symbol !== 'UNKNOWN') {
             try {
               const priceUrl = `https://api.coinbase.com/v2/prices/${symbol}-USD/spot`;
-              console.log(`💵 [PRICE] Fetching USD price for ${symbol}: ${priceUrl}`);
-
               const priceResponse = await fetch(priceUrl);
 
               if (priceResponse.ok) {
@@ -325,8 +440,6 @@ app.get('/balances/evm', async (req, res) => {
                 const decimals = parseInt(balance.amount?.decimals || '0');
                 const actualAmount = tokenAmount / Math.pow(10, decimals);
                 usdValue = actualAmount * usdPrice;
-
-                console.log(`✅ [PRICE] ${symbol} = $${usdPrice} | Balance: ${actualAmount.toFixed(6)} ${symbol} = $${usdValue.toFixed(2)}`);
               } else {
                 console.warn(`⚠️ [PRICE] Price API returned ${priceResponse.status} for ${symbol}`);
               }
@@ -364,14 +477,14 @@ app.get('/balances/evm', async (req, res) => {
 
 /**
  * Solana Token Balance Endpoint
- * GET /balances/solana?address=...
+ * GET /balances/solana?address=...&network=solana
  *
+ * Supported networks: solana (mainnet), solana-devnet (testnet)
  * Returns SPL token balances with USD prices from Coinbase Price API
  */
 app.get('/balances/solana', async (req, res) => {
   try {
-    const { address } = req.query;
-    const network = 'solana';
+    const { address, network = 'solana' } = req.query;
 
     if (!address || typeof address !== 'string') {
       return res.status(400).json({ error: 'address query parameter required' });
@@ -382,9 +495,20 @@ app.get('/balances/solana', async (req, res) => {
       return res.status(400).json({ error: 'Invalid Solana address format' });
     }
 
-    console.log(`💰 [BALANCES] Fetching Solana balances - Address: ${address}`);
+    // Validate and sanitize network input - use allowlist to prevent SSRF
+    const validNetworks: Record<string, string> = {
+      'solana': 'solana',
+      'solana-devnet': 'solana-devnet'
+    };
+    const sanitizedNetwork = validNetworks[network as string];
+    if (!sanitizedNetwork) {
+      return res.status(400).json({ error: `Invalid network. Supported: ${Object.keys(validNetworks).join(', ')}` });
+    }
 
-    const balancesPath = `/platform/v2/solana/token-balances/${network}/${address}`;
+    console.log(`💰 [BALANCES] Fetching Solana balances - Address: ${address}, Network: ${sanitizedNetwork}`);
+
+    // Use sanitized values in URL construction to prevent SSRF
+    const balancesPath = `/platform/v2/solana/token-balances/${sanitizedNetwork}/${address}`;
     const balancesUrl = `https://api.cdp.coinbase.com${balancesPath}`;
 
     console.log(`🔗 [BALANCES] Full URL: ${balancesUrl}`);
@@ -440,8 +564,6 @@ app.get('/balances/solana', async (req, res) => {
           if (symbol && symbol !== 'UNKNOWN') {
             try {
               const priceUrl = `https://api.coinbase.com/v2/prices/${symbol}-USD/spot`;
-              console.log(`💵 [PRICE] Fetching USD price for ${symbol}: ${priceUrl}`);
-
               const priceResponse = await fetch(priceUrl);
 
               if (priceResponse.ok) {
@@ -452,8 +574,6 @@ app.get('/balances/solana', async (req, res) => {
                 const decimals = parseInt(balance.amount?.decimals || '0');
                 const actualAmount = tokenAmount / Math.pow(10, decimals);
                 usdValue = actualAmount * usdPrice;
-
-                console.log(`✅ [PRICE] ${symbol} = $${usdPrice} | Balance: ${actualAmount.toFixed(6)} ${symbol} = $${usdValue.toFixed(2)}`);
               } else {
                 console.warn(`⚠️ [PRICE] Price API returned ${priceResponse.status} for ${symbol}`);
               }
@@ -501,17 +621,43 @@ app.get('/balances/solana', async (req, res) => {
 // In-memory storage for local development
 const pushTokenStore = new Map<string, { token: string; platform: string; tokenType?: string; updatedAt: number }>();
 
+/**
+ * Debug endpoint: Log when push token registration is attempted
+ * No auth required - just for debugging TestFlight
+ */
+app.post('/push-tokens/ping', async (req, res) => {
+  console.log('🔔 [PUSH DEBUG] Registration attempt detected from client:', {
+    ...req.body,
+    timestamp: new Date().toISOString()
+  });
+  res.json({ received: true });
+});
+
 app.post('/push-tokens', async (req, res) => {
   try {
     const { userId, pushToken, platform, tokenType } = req.body;
 
+    console.log('📥 [PUSH] Registration request received:', {
+      userId,
+      platform,
+      tokenType,
+      reqUserId: req.userId,
+      hasToken: !!pushToken,
+      tokenLength: pushToken?.length
+    });
+
     if (!userId || !pushToken) {
+      console.error('❌ [PUSH] Missing required fields');
       return res.status(400).json({ error: 'userId and pushToken are required' });
     }
 
     // Security: Verify the authenticated user matches the userId they're trying to register
     if (req.userId !== userId) {
-      console.error('❌ [PUSH] Unauthorized token registration attempt');
+      console.error('❌ [PUSH] Unauthorized token registration attempt:', {
+        tokenUserId: req.userId,
+        requestUserId: userId,
+        match: req.userId === userId
+      });
       return res.status(403).json({ error: 'Forbidden: Cannot register push token for another user' });
     }
 
@@ -522,18 +668,55 @@ app.post('/push-tokens', async (req, res) => {
       updatedAt: Date.now(),
     };
 
-    // Store in Redis (production) or in-memory (local dev)
-    if (useRedis && redis) {
-      await redis.set(`pushtoken:${userId}`, JSON.stringify(tokenData));
+    // Store in database (production) or in-memory (local dev)
+    if (useDatabase && database) {
+      await database.set(`pushtoken:${userId}`, JSON.stringify(tokenData));
+      console.log('✅ [PUSH] Token stored in database for user:', userId);
     } else {
       pushTokenStore.set(userId, tokenData);
+      console.log('✅ [PUSH] Token stored in memory for user:', userId);
+      console.log('📊 [PUSH] Total tokens in store:', pushTokenStore.size);
     }
 
-    console.log('✅ [PUSH] Token registered for user:', userId, `(${tokenData.tokenType} token)`);
+    console.log('✅ [PUSH] Token registered successfully:', {
+      userId,
+      tokenType: tokenData.tokenType,
+      platform: tokenData.platform
+    });
     res.json({ success: true });
   } catch (error) {
     console.error('❌ [PUSH] Error:', error);
     res.status(500).json({ error: 'Failed to store push token' });
+  }
+});
+
+// Debug endpoint to check push token status
+app.get('/push-tokens/debug/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    let tokenData: any = null;
+    if (useDatabase && database) {
+      const data = await database.get(`pushtoken:${userId}`);
+      tokenData = data ? JSON.parse(data) : null;
+    } else {
+      tokenData = pushTokenStore.get(userId) || null;
+    }
+
+    res.json({
+      userId,
+      hasToken: !!tokenData,
+      tokenData: tokenData ? {
+        platform: tokenData.platform,
+        tokenType: tokenData.tokenType,
+        tokenLength: tokenData.token?.length,
+        updatedAt: new Date(tokenData.updatedAt).toISOString()
+      } : null,
+      storage: useDatabase ? 'database' : 'in-memory',
+      allUserIds: useDatabase ? 'N/A (external database)' : Array.from(pushTokenStore.keys())
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check token' });
   }
 });
 
@@ -544,12 +727,12 @@ app.post('/push-tokens', async (req, res) => {
  * Receives transaction status updates from Coinbase
  * Events: onramp.transaction.created, onramp.transaction.updated, onramp.transaction.success, onramp.transaction.failed
  *
- * Security: Verifies webhook signature using CDP API key
+ * Security: Verifies webhook signature using CDP API key + Rate limiting (DoS protection)
  * Use case: Send push notifications when transactions complete
  *
  * Note: This endpoint is PUBLIC (no auth middleware) because Coinbase servers call it
  */
-app.post('/webhooks/onramp', async (req, res) => {
+app.post('/webhooks/onramp', webhookRateLimiter, async (req, res) => {
   try {
     // Get raw body (from express.raw middleware)
     const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body);
@@ -559,6 +742,7 @@ app.post('/webhooks/onramp', async (req, res) => {
 
     const eventType = webhookData.eventType || webhookData.event;
     console.log('🔔 [WEBHOOK] Received:', eventType);
+    console.log('📦 [WEBHOOK] Full body:', JSON.stringify(webhookData, null, 2));
 
     // Verify webhook signature (security check)
     const webhookSecret = process.env.WEBHOOK_SECRET;
@@ -653,10 +837,10 @@ app.post('/webhooks/onramp', async (req, res) => {
             partnerUserRef
           };
 
-          // Retrieve push token from Redis (production) or in-memory (local dev)
+          // Retrieve push token from database (production) or in-memory (local dev)
           let userTokenData: { token: string; platform: string; tokenType?: string; updatedAt: number } | null;
-          if (useRedis && redis) {
-            const data = await redis.get(`pushtoken:${partnerUserRef}`);
+          if (useDatabase && database) {
+            const data = await database.get(`pushtoken:${partnerUserRef}`);
             userTokenData = data ? JSON.parse(data) : null;
           } else {
             userTokenData = pushTokenStore.get(partnerUserRef) || null;
@@ -680,7 +864,7 @@ app.post('/webhooks/onramp', async (req, res) => {
                 const apn = await import('@parse/node-apn');
                 const notification = new apn.Notification({
                   alert: { title, body },
-                  topic: 'com.mlioncb.onrampv2demo', // Your bundle ID
+                  topic: 'com.coinbase.cdp-onramp', // Your bundle ID
                   sound: 'default',
                   payload: notificationData
                 });
@@ -803,10 +987,10 @@ app.post('/webhooks/onramp', async (req, res) => {
             partnerUserRef: failedPartnerUserRef
           };
 
-          // Retrieve push token from Redis (production) or in-memory (local dev)
+          // Retrieve push token from database (production) or in-memory (local dev)
           let failedUserTokenData: { token: string; platform: string; tokenType?: string; updatedAt: number } | null;
-          if (useRedis && redis) {
-            const data = await redis.get(`pushtoken:${failedPartnerUserRef}`);
+          if (useDatabase && database) {
+            const data = await database.get(`pushtoken:${failedPartnerUserRef}`);
             failedUserTokenData = data ? JSON.parse(data) : null;
           } else {
             failedUserTokenData = pushTokenStore.get(failedPartnerUserRef) || null;
@@ -822,7 +1006,7 @@ app.post('/webhooks/onramp', async (req, res) => {
                 const apn = await import('@parse/node-apn');
                 const notification = new apn.Notification({
                   alert: { title: failTitle, body: failBody },
-                  topic: 'com.mlioncb.onrampv2demo', // Your bundle ID
+                  topic: 'com.coinbase.cdp-onramp', // Your bundle ID
                   sound: 'default',
                   payload: failData
                 });

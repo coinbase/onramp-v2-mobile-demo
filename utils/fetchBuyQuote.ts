@@ -3,7 +3,7 @@ import { BASE_URL } from '@/constants/BASE_URL';
 import { authenticatedFetch } from './authenticatedFetch';
 import { createApplePayOrder } from './createApplePayOrder';
 import { demoAddressForNetwork } from './randomAddresses';
-import { getCountry, getSubdivision } from './sharedState';
+import { getCountry, getSubdivision, getCurrentWalletAddress, getSandboxMode } from './sharedState';
 
 export async function fetchBuyQuote(payload: {
   paymentCurrency: string;
@@ -12,7 +12,11 @@ export async function fetchBuyQuote(payload: {
   destinationNetwork: string;
   paymentMethod: string;
 }) {
-  const destinationAddress = demoAddressForNetwork(payload.destinationNetwork);
+  // In sandbox mode, use the current wallet address (could be manual override)
+  // In production, fall back to demo address for quote purposes
+  const isSandbox = getSandboxMode();
+  const userAddress = getCurrentWalletAddress();
+  const destinationAddress = (isSandbox && userAddress) ? userAddress : demoAddressForNetwork(payload.destinationNetwork);
 
   // If we couldn't generate a demo address for this network, return null instead of erroring
   if (!destinationAddress) {

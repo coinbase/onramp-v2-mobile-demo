@@ -85,10 +85,10 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { COLORS } from '../../constants/Colors';
 import { TEST_ACCOUNTS } from '../../constants/TestAccounts';
-import { getCountry, getSandboxMode, isTestSessionActive, setCurrentNetwork } from '../../utils/sharedState';
+import { getCountry, getPendingForm, getSandboxMode, getSubdivision, isTestSessionActive, setCountry, setCurrentNetwork, setSandboxMode, setSubdivision } from '../../utils/sharedState';
 import { SwipeToConfirm } from '../ui/SwipeToConfirm';
 
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE, SILVER } = COLORS;
@@ -121,6 +121,7 @@ type OnrampFormProps = {
   amount: string;
   onAmountChange: (amount: string) => void;
   sandboxMode?: boolean; // Add sandbox prop
+  buyConfig?: any;
 };
 
 /**
@@ -142,7 +143,8 @@ export function OnrampForm({
   paymentCurrencies,
   amount,
   onAmountChange,
-  sandboxMode
+  sandboxMode,
+  buyConfig
 }: OnrampFormProps) {
   // Import hooks for production card visibility and Smart Account check
   const { useIsSignedIn, useCurrentUser } = require('@coinbase/cdp-hooks');
@@ -152,7 +154,6 @@ export function OnrampForm({
   const [asset, setAsset] = useState("USDC");
   const [network, setNetwork] = useState("Base");
   const [paymentMethod, setPaymentMethod] = useState("GUEST_CHECKOUT_APPLE_PAY");
-  const [sandbox, setSandbox] = useState(false);
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
   const [networkPickerVisible, setNetworkPickerVisible] = useState(false);
   const [paymentPickerVisible, setPaymentPickerVisible] = useState(false);
@@ -163,6 +164,21 @@ export function OnrampForm({
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslate = useRef(new Animated.Value(300)).current;
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
+  const [localSandboxEnabled, setLocalSandboxEnabled] = useState(getSandboxMode());
+  const [countryPickerVisible, setCountryPickerVisible] = useState(false);
+const [subPickerVisible, setSubPickerVisible] = useState(false);
+const [country, setCountryLocal] = useState(getCountry());
+const [subdivision, setSubdivisionLocal] = useState(getSubdivision());
+
+const countries = useMemo(() => {
+  const src = buyConfig?.countries ?? options?.countries;
+  return src?.map((c: any) => c.id).filter(Boolean) ?? [];
+}, [buyConfig, options]);
+
+const usSubs = useMemo(() => {
+  const src = buyConfig?.countries ?? options?.countries;
+  return src?.find((c: any) => c.id === 'US')?.subdivisions ?? [];
+}, [buyConfig, options]);
 
   const isEvmNetwork = (() => {
     const n = (network || '').toLowerCase();
@@ -202,9 +218,8 @@ export function OnrampForm({
     if (prevNetworkRef.current === network) return;
     prevNetworkRef.current = network;
 
-    const isSandbox = getSandboxMode();
-    if (!isSandbox && (isEvmNetwork || isSolanaNetwork)) {
-      // Only update address for supported networks (EVM/Solana)
+    if (!localSandboxEnabled && (isEvmNetwork || isSolanaNetwork)) {
+      // Only update address for supported networks (EVM/Solana) in production mode
       // For unsupported networks (Noble, etc.), don't auto-update
       const { getCurrentWalletAddress } = require('../../utils/sharedState');
       const newAddress = getCurrentWalletAddress();
@@ -212,7 +227,7 @@ export function OnrampForm({
         onAddressChange(newAddress);
       }
     }
-  }, [network, address, onAddressChange, isEvmNetwork, isSolanaNetwork]);
+  }, [network, address, onAddressChange, isEvmNetwork, isSolanaNetwork, localSandboxEnabled]);
   
 
   const amountNumber = useMemo(() => {
@@ -230,8 +245,8 @@ export function OnrampForm({
     return /^[1-9A-HJ-NP-Za-km-z]+$/.test(address);
   })();
 
-  // Use prop if provided, otherwise fallback to getSandboxMode()
-  const isSandbox = sandboxMode ?? getSandboxMode();
+  // Use local state as single source of truth for sandbox mode
+  const isSandbox = localSandboxEnabled;
 
   // Check if Smart Account is available for EVM networks (production only)
   // TestFlight reviewers use hardcoded address as their "smart account"
@@ -250,19 +265,6 @@ export function OnrampForm({
   // For production EVM networks, must have Smart Account
   const isFormValid = isAmountValid && !!network && !!asset && hasValidAddress && (!needsSmartAccount || hasSmartAccount);
 
-  // Debug logging for form validation
-  useEffect(() => {
-    console.log('🔍 Form Validation:', {
-      isSandbox,
-      sandboxModeProp: sandboxMode,
-      address: address?.slice(0, 10) + '...',
-      hasValidAddress,
-      isAmountValid,
-      network,
-      asset,
-      isFormValid
-    });
-  }, [isSandbox, sandboxMode, address, hasValidAddress, isAmountValid, network, asset, isFormValid]);
   /**
    * Dynamic filtering: changing asset updates available networks, and vice versa
    * 
@@ -273,20 +275,14 @@ export function OnrampForm({
    * 4. useEffect hooks → auto-clear invalid selections
    */
 
-  const country = getCountry(); 
-
   const availableNetworks = useMemo(() => {
     if (!getAvailableNetworks) return ["ethereum", "base"]; // Fallback (shouldn't happen)
-    const networks = getAvailableNetworks(asset);
-    console.log('📊 [DEBUG] availableNetworks:', networks?.length, 'networks');
-    return networks;
+    return getAvailableNetworks(asset);
   }, [asset, getAvailableNetworks]);
 
   const availableAssets = useMemo(() => {
     if (!getAvailableAssets) return ["USDC", "ETH"]; // Fallback (shouldn't happen)
-    const assets = getAvailableAssets(network);
-    console.log('📊 [DEBUG] availableAssets:', assets?.length, 'assets');
-    return assets;
+    return getAvailableAssets(network);
   }, [network, getAvailableAssets]);
 
   const methods = useMemo(() => {
@@ -315,6 +311,34 @@ export function OnrampForm({
       setPaymentMethod(methods[0]?.value || 'COINBASE_WIDGET');
     }
   }, [methods, paymentMethod]);
+
+  // Initialize sandbox mode from shared state on mount only
+  // After that, local state is the single source of truth
+  useEffect(() => {
+    const sharedSandboxMode = getSandboxMode();
+    console.log('🔄 [SANDBOX INIT] Initializing from shared state:', sharedSandboxMode);
+    setLocalSandboxEnabled(sharedSandboxMode);
+  }, []); // Only run once on mount
+
+  // Reset sandbox mode to true (safe default) when user signs in/out
+  // EXCEPT when there's a pending form - restore user's choice from pending form
+  useEffect(() => {
+    if (currentUser?.userId) {
+      const pending = getPendingForm();
+      if (pending && typeof pending.sandbox === 'boolean') {
+        // User is returning from phone re-verification with a saved form
+        // Restore their sandbox choice from the pending form
+        console.log('👤 [SANDBOX RESTORE] Restoring from pending form, sandbox =', pending.sandbox);
+        setLocalSandboxEnabled(pending.sandbox);
+        setSandboxMode(pending.sandbox);
+      } else {
+        // Fresh login - reset to safe default (sandbox mode)
+        console.log('👤 [SANDBOX RESET] Fresh login, resetting to safe default (true)');
+        setLocalSandboxEnabled(true);
+        setSandboxMode(true);
+      }
+    }
+  }, [currentUser?.userId]);
 
   const getPaymentMethodDisplay = (value: string) => {
     const method = methods.find(m => m.value === value);
@@ -404,14 +428,43 @@ export function OnrampForm({
     }
   }, [paymentCurrencyPickerVisible]);
 
+  // Animate country picker modal
+  useEffect(() => {
+    if (countryPickerVisible) {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(sheetTranslate, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 90 }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(sheetTranslate, { toValue: 300, duration: 150, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [countryPickerVisible]);
+
+  // Animate subdivision picker modal
+  useEffect(() => {
+    if (subPickerVisible) {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(sheetTranslate, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 90 }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(sheetTranslate, { toValue: 300, duration: 150, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [subPickerVisible]);
+
   // If user switches to a non‑supported network, clear the address (only in production mode)
   // In sandbox mode, allow any address for any network
   useEffect(() => {
-    const isSandbox = getSandboxMode();
-    if (!isSandbox && !isEvmNetwork && !isSolanaNetwork && address) {
+    if (!localSandboxEnabled && !isEvmNetwork && !isSolanaNetwork && address) {
       onAddressChange('');
     }
-  }, [isEvmNetwork, isSolanaNetwork, address, onAddressChange]);
+  }, [isEvmNetwork, isSolanaNetwork, address, onAddressChange, localSandboxEnabled]);
 
   const getCurrencyLimits = useCallback(() => {
     if (!options?.payment_currencies) return null;
@@ -523,32 +576,58 @@ export function OnrampForm({
       return;
     }
 
-    // Direct submission with one-click (/ slide) experience
-    console.log('Form is valid, submitting with quote')
+    // localSandboxEnabled is the single source of truth
+    console.log('🔍 [FORM SUBMIT] Submitting with sandbox =', localSandboxEnabled);
+
     onSubmit({
-      amount: amount, // Use total payment amount from quote
+      amount: amount,
       asset,
       network,
       address,
       paymentMethod,
       paymentCurrency,
-      sandbox,
+      sandbox: localSandboxEnabled, // Single source of truth
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
     });
-  }, [isFormValid, currentQuote, asset, network, address, sandbox, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp]);
+  }, [isFormValid, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp]);
   return (
-    <ScrollView 
-      contentContainerStyle={styles.content} 
+    <ScrollView
+      contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
-      scrollEnabled={!isSwipeActive} // Disable scrolling during swipe
+      scrollEnabled={!isSwipeActive}
+      contentInsetAdjustmentBehavior="automatic"
+      removeClippedSubviews={false}
+      bounces
+      overScrollMode="always"
     >
-      
+      {/* Environment Card (Sandbox / Production) */}
+      <View style={styles.card}>
+        <View style={styles.paymentRow}>
+          <Text style={styles.paymentLabel}>
+            {localSandboxEnabled ? 'Sandbox Environment' : 'Production Environment'}
+          </Text>
+          <Switch
+            value={localSandboxEnabled}
+            onValueChange={(value) => {
+              console.log('🔄 [SANDBOX TOGGLE] User toggled sandbox to:', value);
+              setLocalSandboxEnabled(value); // Single source of truth
+              setSandboxMode(value); // Sync to shared state for other components
+            }}
+            trackColor={{ true: BLUE, false: BORDER }}
+            thumbColor={Platform.OS === 'android' ? (localSandboxEnabled ? '#ffffff' : '#f4f3f4') : undefined}
+          />
+        </View>
+        <Text style={styles.helper}>
+          {localSandboxEnabled ? 'Test without real transactions' : 'Real transactions will be executed'}
+        </Text>
+      </View>
+
       {/* Buy Card */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Buy</Text>
         <View style={styles.inputRow}>
-          <TextInput
-            value={amount}
+        <TextInput
+          value={amount}
             onChangeText={onAmountChange}
             placeholder="0"
             placeholderTextColor={TEXT_SECONDARY}
@@ -572,9 +651,9 @@ export function OnrampForm({
               {limits.display}
             </Text>
           </View>
-          ) : null}
+        ) : null}
       </View>
-  
+
       {/* Receive Card */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Receive</Text>
@@ -587,7 +666,7 @@ export function OnrampForm({
                 {currentQuote?.purchase_amount?.value || '0'}
               </Text>
             )}
-          </View>
+      </View>
           <Pressable style={styles.assetSelect} onPress={() => setAssetPickerVisible(true)}>
             <View style={styles.selectContent}>
               {(() => {
@@ -604,9 +683,9 @@ export function OnrampForm({
               <Text style={styles.assetText}>{asset}</Text>
             </View>
             <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
-          </Pressable>
-        </View>
-        
+        </Pressable>
+      </View>
+
         {/* Network Row */}
         <View style={styles.networkRow}>
           <Text style={styles.networkLabel}>Network</Text>
@@ -623,13 +702,15 @@ export function OnrampForm({
                   />
                 );
               })()}
-              <Text style={styles.networkText}>{network}</Text>
-            </View>
-            <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+               <View style={styles.selectTextContainer}>
+                 <Text style={styles.networkText}>{network}</Text>
+               </View>
+               </View>
+             <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} style={styles.selectChevron} />
           </Pressable>
         </View>
       </View>
-  
+
       {/* Payment Method Card */}
       <View style={styles.card}>
         <View style={styles.paymentRow}>
@@ -639,10 +720,10 @@ export function OnrampForm({
               <Text style={styles.paymentText}>{getPaymentMethodDisplay(paymentMethod)}</Text>
             </View>
             <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
-          </Pressable>
+        </Pressable>
         </View>
       </View>
-  
+
   
       {/* Sandbox Toggle
       <View style={styles.switchRow}>
@@ -663,7 +744,7 @@ export function OnrampForm({
             <Text style={styles.quoteValue}>
               ${currentQuote.payment_subtotal?.value || currentQuote.paymentSubtotal?.value || '0'}
             </Text>
-          </View>
+      </View>
           <View style={styles.quoteRow}>
             <Text style={styles.quoteLabel}>Coinbase fee</Text>
             <Text style={styles.quoteValue}>
@@ -696,7 +777,7 @@ export function OnrampForm({
       )}
 
       {/* Wallet Notification */}
-      {!getSandboxMode() && !isEvmNetwork && !isSolanaNetwork ? (
+      {!localSandboxEnabled && !isEvmNetwork && !isSolanaNetwork ? (
         <View style={styles.notificationCard}>
           <View style={styles.notificationHeader}>
             <Ionicons name="information-circle" size={20} color="#FF8C00" />
@@ -716,7 +797,7 @@ export function OnrampForm({
             EVM onramp transactions require a Smart Account to receive funds. Your balances are stored in the Smart Account. Please ensure your Embedded Wallet is properly initialized.
           </Text>
         </View>
-      ) : !getSandboxMode() && !hasValidAddress ? (
+      ) : !localSandboxEnabled && !hasValidAddress ? (
         <View style={[styles.notificationCard, styles.errorCard]}>
           <View style={styles.notificationHeader}>
             <Ionicons name="alert-circle" size={20} color="#FF6B6B" />
@@ -726,7 +807,7 @@ export function OnrampForm({
             Connect a valid {isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} address to continue
           </Text>
         </View>
-      ) : getSandboxMode() && !address ? (
+      ) : localSandboxEnabled && !address ? (
         <View style={[styles.notificationCard, styles.errorCard]}>
           <View style={styles.notificationHeader}>
             <Ionicons name="alert-circle" size={20} color="#FF6B6B" />
@@ -736,7 +817,7 @@ export function OnrampForm({
             Enter a wallet address in Profile → Sandbox Wallet, or connect an Embedded Wallet to continue testing.
           </Text>
         </View>
-      ) : getSandboxMode() ? (
+      ) : localSandboxEnabled ? (
         <View style={[styles.notificationCard, styles.sandboxCard]}>
           <View style={styles.notificationHeader}>
             <Ionicons name="flask" size={20} color={BLUE} />
@@ -748,11 +829,7 @@ export function OnrampForm({
           </Text>
 
           <Text style={[styles.notificationText, styles.italicNote]}>
-            Head to the <Text style={styles.badgeProd}>Profile</Text> page to use a manual wallet address (signed out), or connect to an Embedded Wallet (EVM or Solana Network).
-          </Text>
-
-          <Text style={[styles.notificationText, styles.italicNote]}>
-            You may toggle to Production Mode to test with a real wallet on the <Text style={styles.badgeProd}>Profile</Text> page.
+            Head to the <Text style={styles.badgeProd}>Wallet</Text> page to override with a manual wallet address.
           </Text>
         </View>
       ) : isSignedIn ? (
@@ -762,11 +839,11 @@ export function OnrampForm({
             <Text style={[styles.notificationTitle, { color: '#FF6B6B' }]}>Production Mode</Text>
           </View>
           <Text style={[styles.notificationText, { fontWeight: '600' }]}>
-            Real transactions will be executed on-chain
+            Real transactions will be executed on-chain if successful
           </Text>
           {address ? (
             <Text style={[styles.notificationText, { marginTop: 8, fontFamily: 'monospace' }]}>
-              Using: {address.slice(0, 8)}...{address.slice(-6)}
+              Using wallet: {address}
             </Text>
           ) : !isEvmNetwork && !isSolanaNetwork ? (
             <Text style={[styles.notificationText, { marginTop: 8, fontStyle: 'italic', color: TEXT_SECONDARY }]}>
@@ -793,6 +870,33 @@ export function OnrampForm({
           <Text style={styles.termsLink} onPress={() => Linking.openURL('https://www.coinbase.com/legal/user_agreement/united_states')}>User Agreement</Text>, and{' '}
           <Text style={styles.termsLink} onPress={() => Linking.openURL('https://www.coinbase.com/legal/privacy')}>Privacy Policy</Text>
         </Text>
+      </View>
+
+      {/* Region (Country / Subdivision) */}
+      <View style={[styles.card, styles.regionCard]}>
+        <Text style={styles.cardTitle}>Available Asset Options</Text>
+
+        <View style={styles.paymentRow}>
+          <Text style={styles.regionLabel}>Country</Text>
+          <Pressable style={styles.regionSelect} onPress={() => setCountryPickerVisible(true)}>
+            <View style={styles.selectContent}>
+              <Text style={styles.regionSelectText}>{country}</Text>
+            </View>
+            <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+          </Pressable>
+        </View>
+
+        {country === 'US' && (
+          <View style={[styles.paymentRow, { marginTop: 8 }]}>
+            <Text style={styles.regionLabel}>Subdivision</Text>
+            <Pressable style={styles.regionSelect} onPress={() => setSubPickerVisible(true)}>
+              <View style={styles.selectContent}>
+                <Text style={styles.regionSelectText}>{subdivision || 'Select'}</Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+            </Pressable>
+          </View>
+        )}
       </View>
   
       {/* All existing modals */}
@@ -853,9 +957,9 @@ export function OnrampForm({
         </View>
       </Modal>
       {/* Asset picker modal */}
-      <Modal 
-        visible={assetPickerVisible} 
-        transparent 
+      <Modal
+        visible={assetPickerVisible}
+        transparent
         animationType="none"
         presentationStyle="overFullScreen"
         onRequestClose={() => setAssetPickerVisible(false)}
@@ -884,12 +988,12 @@ export function OnrampForm({
                 const isSelected = displayName === asset;
                 
                 return (
-                  <Pressable
+              <Pressable
                     key={`asset-${index}-${displayName}`}
-                    onPress={() => {
+                onPress={() => {
                       setAsset(displayName);
-                      setAssetPickerVisible(false);
-                    }}
+                  setAssetPickerVisible(false);
+                }}
                     style={[styles.modalItem, isSelected && styles.modalItemSelected]}
                   >
                     <View style={styles.modalItemContent}>
@@ -903,7 +1007,7 @@ export function OnrampForm({
                         <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>
                           {displayName}
                         </Text>
-                      </View>
+          </View>
                       {isSelected && (
                         <Ionicons name="checkmark" size={20} color={BLUE} />
                       )}
@@ -917,9 +1021,9 @@ export function OnrampForm({
       </Modal>
 
       {/* Network picker modal */}
-      <Modal 
-        visible={networkPickerVisible} 
-        transparent 
+      <Modal
+        visible={networkPickerVisible}
+        transparent
         animationType="none"
         presentationStyle="overFullScreen"
         onRequestClose={() => setNetworkPickerVisible(false)}
@@ -950,12 +1054,12 @@ export function OnrampForm({
                   const isSelected = displayName === network;
                   
                   return (
-                    <Pressable
+              <Pressable
                       key={`network-${index}-${displayName}`}
-                      onPress={() => {
+                onPress={() => {
                         setNetwork(displayName);
-                        setNetworkPickerVisible(false);
-                      }}
+                  setNetworkPickerVisible(false);
+                }}
                       style={[styles.modalItem, isSelected && styles.modalItemSelected]}
                     >
                       <View style={styles.modalItemContent}>
@@ -969,7 +1073,7 @@ export function OnrampForm({
                           <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>
                             {displayName}
                           </Text>
-                        </View>
+          </View>
                         {isSelected && (
                           <Ionicons name="checkmark" size={20} color={BLUE} />
                         )}
@@ -1010,12 +1114,12 @@ export function OnrampForm({
                 const isSelected = method.value === paymentMethod;
                 
                 return (
-                  <Pressable
+              <Pressable
                     key={`payment-${index}-${method.value}`}
-                    onPress={() => {
+                onPress={() => {
                       setPaymentMethod(method.value);
-                      setPaymentPickerVisible(false);
-                    }}
+                  setPaymentPickerVisible(false);
+                }}
                     style={[styles.modalItem, isSelected && styles.modalItemSelected]}
                   >
                     <View style={styles.modalItemContent}>
@@ -1027,6 +1131,100 @@ export function OnrampForm({
                       {isSelected && (
                         <Ionicons name="checkmark" size={20} color={BLUE} />
                       )}
+                    </View>
+              </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      </Modal>
+
+      {/* Country picker modal */}
+      <Modal
+        visible={countryPickerVisible}
+        transparent
+        animationType="none"
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setCountryPickerVisible(false)}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', opacity: backdropOpacity }]}>
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setCountryPickerVisible(false)} />
+          </Animated.View>
+
+          <Animated.View style={[styles.modalSheet, { transform: [{ translateY: sheetTranslate }] }]}>
+            <View style={styles.modalHandle} />
+            <ScrollView style={styles.modalScrollView} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
+              {countries.map((c: string, index: number) => {
+                const isSelected = c === country;
+                return (
+                  <Pressable
+                    key={`country-${index}-${c}`}
+                    onPress={() => {
+                      setCountry(c);
+                      setCountryLocal(c);
+                      if (c === 'US') {
+                        const curr = getSubdivision();
+                        if (!curr) {
+                          setSubdivision('CA');
+                          setSubdivisionLocal('CA');
+                        }
+                      } else {
+                        setSubdivision('');
+                        setSubdivisionLocal('');
+                      }
+                      setCountryPickerVisible(false);
+                    }}
+                    style={[styles.modalItem, isSelected && styles.modalItemSelected]}
+                  >
+                    <View style={styles.modalItemContent}>
+                      <View style={styles.modalItemLeft}>
+                        <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>{c}</Text>
+                      </View>
+                      {isSelected && <Ionicons name="checkmark" size={20} color={BLUE} />}
+                    </View>
+            </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+          </View>
+      </Modal>
+
+      {/* Subdivision picker modal */}
+      <Modal
+        visible={subPickerVisible}
+        transparent
+        animationType="none"
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setSubPickerVisible(false)}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', opacity: backdropOpacity }]}>
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setSubPickerVisible(false)} />
+          </Animated.View>
+
+          <Animated.View style={[styles.modalSheet, { transform: [{ translateY: sheetTranslate }] }]}>
+            <View style={styles.modalHandle} />
+            <ScrollView style={styles.modalScrollView} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
+              {usSubs.map((s: string, index: number) => {
+                const isSelected = s === subdivision;
+                return (
+                  <Pressable
+                    key={`sub-${index}-${s}`}
+                    onPress={() => {
+                      setSubdivision(s);
+                      setSubdivisionLocal(s);
+                      setSubPickerVisible(false);
+                    }}
+                    style={[styles.modalItem, isSelected && styles.modalItemSelected]}
+                  >
+                    <View style={styles.modalItemContent}>
+                      <View style={styles.modalItemLeft}>
+                        <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>{s}</Text>
+                      </View>
+                      {isSelected && <Ionicons name="checkmark" size={20} color={BLUE} />}
                     </View>
                   </Pressable>
                 );
@@ -1041,10 +1239,10 @@ export function OnrampForm({
 
 const styles = StyleSheet.create({
   content: {
-    padding: 12,                
-    gap: 12,                     
+    padding: 16,
+    gap: 12,
     backgroundColor: DARK_BG,
-    paddingBottom: 100,       
+    paddingBottom: 20, // Reduced from 100 to bring region section closer
   },
   fieldGroup: {
     gap: 6,
@@ -1084,7 +1282,7 @@ const styles = StyleSheet.create({
     maxWidth: 120,             
   },
   currencyText: {
-    fontSize: 14,             
+    fontSize: 14,
     fontWeight: '500',
     color: TEXT_PRIMARY,
   },
@@ -1151,7 +1349,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,        
     borderRadius: 16,
     gap: 8,                    
-    maxWidth: 120,             
+    maxWidth: 180,
+    position: 'relative',
+    paddingRight: 28, // space for absolute chevron
   },
   networkIcon: {
     width: 20,
@@ -1163,6 +1363,9 @@ const styles = StyleSheet.create({
     fontSize: 14,             
     fontWeight: '500',
     color: TEXT_PRIMARY,
+    flex: 1,
+    flexShrink: 1,
+    lineHeight: 20,
   },
   // Payment styles
   paymentRow: {
@@ -1298,7 +1501,7 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,     
     borderColor: BORDER,
     borderWidth: 1,              
-    borderRadius: 12,            
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: Platform.select({ ios: 16, android: 14, default: 16 }),
     
@@ -1319,7 +1522,7 @@ const styles = StyleSheet.create({
   },
   switchRow: {
     marginTop: 6,             
-    paddingVertical: 8,       
+    paddingVertical: 8,
     paddingHorizontal: 4,
     flexDirection: "row",
     alignItems: "center",
@@ -1348,9 +1551,9 @@ const styles = StyleSheet.create({
     backgroundColor: CARD_BG,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '75%',
+    maxHeight: '50%',
     width: '100%',
-    minHeight: 280,
+    minHeight: 320,
     paddingBottom: 20,
     paddingTop: 8,
   },
@@ -1373,9 +1576,7 @@ const styles = StyleSheet.create({
     color: BLUE,
     fontWeight: '600',
   },
-  modalScrollView: {
-    maxHeight: 400,
-  },
+  modalScrollView: {},
   modalItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1406,12 +1607,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
+    paddingRight: 0,
   },
   selectIcon: {
     width: 24,
     height: 24,
     marginRight: 12,
     borderRadius: 12,
+  },
+  selectTextContainer: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
+    justifyContent: 'center',
+  },
+  selectChevron: {
+    position: 'absolute',
+    right: 8,
+    top: 10, // centers visually with 20px icon + 8px vertical padding
   },
   card: {
     backgroundColor: CARD_BG,
@@ -1474,6 +1688,29 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FF6B6B',
     backgroundColor: '#FF6B6B08', // Very light red tint
+  },
+  regionCard: {
+    padding: 12,
+  },
+  regionLabel: {
+    fontSize: 14,
+    color: TEXT_SECONDARY,
+    fontWeight: '500',
+  },
+  regionSelect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: BORDER,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 8,
+    maxWidth: 160,
+  },
+  regionSelectText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: TEXT_PRIMARY,
   },
   notificationHeader: {
     flexDirection: 'row',

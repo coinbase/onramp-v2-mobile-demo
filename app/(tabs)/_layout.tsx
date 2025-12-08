@@ -31,12 +31,12 @@ export default function TabLayout() {
             tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />
           }} 
         />
-        <Tabs.Screen 
-          name="profile" 
-          options={{ 
-            title: 'Profile',
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: 'Wallet',
             tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />
-          }} 
+          }}
         />
       </Tabs>
     </SafeAreaView>

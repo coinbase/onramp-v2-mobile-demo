@@ -8,12 +8,12 @@
  * TestFlight accounts bypass this check automatically.
  */
 
-import { useIsSignedIn, useIsInitialized } from '@coinbase/cdp-hooks';
-import { useRouter, useSegments, useRootNavigationState } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
-import { isTestSessionActive } from '@/utils/sharedState';
 import { COLORS } from '@/constants/Colors';
+import { isTestSessionActive } from '@/utils/sharedState';
+import { useIsInitialized, useIsSignedIn } from '@coinbase/cdp-hooks';
+import { useRootNavigationState, useSegments } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 const { DARK_BG, BLUE } = COLORS;
 
@@ -29,6 +29,18 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   // TestFlight bypass OR real CDP auth
   const isAuthenticated = testSession || isSignedIn;
 
+  // Track when isSignedIn changes unexpectedly
+  useEffect(() => {
+    console.log('🔐 [AUTH GATE] isSignedIn changed:', {
+      isSignedIn,
+      testSession,
+      isAuthenticated,
+      isInitialized,
+      hasCheckedAuth,
+      timestamp: new Date().toISOString()
+    });
+  }, [isSignedIn]);
+
   // Wait for navigation to be ready before attempting any navigation
   useEffect(() => {
     if (navigationState?.key) {
@@ -39,17 +51,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   // Add a delay after initialization to let CDP load stored credentials
   useEffect(() => {
     if (isInitialized) {
-      // Give CDP 500ms to load stored credentials before checking auth
+      // Give CDP time to load stored credentials before checking auth
       const timer = setTimeout(() => {
+        console.log('✅ [AUTH GATE] Credential loading delay complete');
         setHasCheckedAuth(true);
-      }, 500);
+      }, 2000); // 2 seconds - increased for CDP session loading
       return () => clearTimeout(timer);
     }
   }, [isInitialized]);
 
   useEffect(() => {
     // Only run navigation logic after the router is ready
-    if (!isReady) return;
+    if (!isReady) {
+      console.log('⏳ [AUTH GATE] Router not ready');
+      return;
+    }
 
     // Wait for CDP to initialize before making auth decisions
     if (!isInitialized) {
@@ -63,10 +79,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Additional safety: Don't run auth checks too frequently
+    // This prevents rapid re-checks during navigation transitions
+    console.log('✅ [AUTH GATE] All initialization complete, running auth check');
+
     const inAuthGroup = segments[0] === 'auth';
 
-    // Allow unauthenticated access to email/SMS verification flows
-    const publicRoutes = ['email-verify', 'email-code', 'sms-verify', 'sms-code'];
+    // Allow unauthenticated access to email/phone verification flows (for sign-in)
+    const publicRoutes = ['email-verify', 'email-code', 'phone-verify', 'phone-code'];
     const isPublicRoute = publicRoutes.includes(segments[0]);
 
     console.log('🔍 [AUTH GATE] Auth check:', {
@@ -75,12 +95,18 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       testSession,
       inAuthGroup,
       isPublicRoute,
-      segments: segments.join('/')
+      segments: segments.join('/'),
+      timestamp: new Date().toISOString()
     });
 
     if (!isAuthenticated && !inAuthGroup && !isPublicRoute) {
       // Not logged in and not on login/public screen → redirect
-      console.log('🚫 [AUTH GATE] Not authenticated, redirecting to login');
+      console.warn('🚫 [AUTH GATE] LOGGING OUT USER - Not authenticated', {
+        isSignedIn,
+        testSession,
+        currentPath: segments.join('/'),
+        timestamp: new Date().toISOString()
+      });
       // Use setTimeout to defer navigation to next tick
       setTimeout(() => {
         try {
@@ -117,6 +143,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           <View style={styles.debugRow}>
             <View style={[styles.dot, isInitialized ? styles.dotGreen : styles.dotRed]} />
             <Text style={styles.debugText}>CDP Initialized</Text>
+          </View>
+          <View style={styles.debugRow}>
+            <View style={[styles.dot, hasCheckedAuth ? styles.dotGreen : styles.dotRed]} />
+            <Text style={styles.debugText}>Credentials Loaded</Text>
           </View>
           <View style={styles.debugRow}>
             <View style={[styles.dot, testSession ? styles.dotGreen : styles.dotRed]} />
@@ -157,6 +187,14 @@ const styles = StyleSheet.create({
   debugText: {
     fontSize: 12,
     color: '#999',
+  },
+  debugHint: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 16,
+    paddingHorizontal: 20,
   },
   dot: {
     width: 8,

@@ -70,11 +70,11 @@ import { fetchBuyConfig } from "@/utils/fetchBuyConfig";
 import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { useCallback, useMemo, useState } from "react";
 import { OnrampFormData } from "../components/onramp/OnrampForm";
+import { TEST_ACCOUNTS } from "../constants/TestAccounts";
 import { createApplePayOrder } from "../utils/createApplePayOrder";
 import { fetchBuyOptions } from "../utils/fetchBuyOptions";
 import { fetchBuyQuote } from "../utils/fetchBuyQuote";
 import { getCountry, getSandboxMode, getSubdivision, getVerifiedPhone, getVerifiedPhoneAt, isPhoneFresh60d, isTestSessionActive, setCurrentPartnerUserRef, setSubdivision } from "../utils/sharedState";
-import { TEST_ACCOUNTS } from "../constants/TestAccounts";
 
 
 export type PaymentMethodOption = { display: string; value: string };
@@ -127,14 +127,23 @@ export function useOnramp() {
     try {
       setIsProcessingPayment(true); // Start loading
 
-      // Get email from CDP user, fallback to placeholder
-      const userEmail = currentUser?.authenticationMethods.email?.email || 'noemail@test.com';
+      // Check if this is a test session (used throughout the function)
+      const isTestSession = isTestSessionActive();
+      const currentSandboxMode = getSandboxMode();
+
+      console.log('🔍 [APPLE PAY] Sandbox detection:', {
+        isTestSession,
+        getSandboxMode: currentSandboxMode,
+        shouldUseSandbox: currentSandboxMode || isTestSession
+      });
 
       // Generate unique user reference for transaction tracking
-      // Apple Pay: Use userId with sandbox prefix for sandbox environment
-      const sandboxPrefix = getSandboxMode() ? "sandbox-" : "";
+      // Apple Pay: Use userId with sandbox prefix for sandbox environment OR test accounts
+      const sandboxPrefix = (currentSandboxMode || isTestSession) ? "sandbox-" : "";
       const userId = currentUser?.userId || 'unknown-user';
       const partnerUserRef = `${sandboxPrefix}${userId}`;
+
+      console.log('🔍 [APPLE PAY] partnerUserRef:', partnerUserRef);
       setCurrentPartnerUserRef(partnerUserRef);
 
       // IMPORTANT: Register push token before transaction (ensures webhook can send notification)
@@ -153,13 +162,63 @@ export function useOnramp() {
         // Don't block transaction if push token fails
       }
 
+      // Apple Pay Guest Checkout requires BOTH email and phone
+      // For test sessions, use test account credentials
+      const userEmail = isTestSession
+        ? TEST_ACCOUNTS.email
+        : (currentUser?.authenticationMethods.email?.email || null);
+      const cdpPhone = isTestSession
+        ? TEST_ACCOUNTS.phone
+        : (currentUser?.authenticationMethods.sms?.phoneNumber || null);
+
       let phone = getVerifiedPhone();
       let phoneAt = getVerifiedPhoneAt();
-      if (getSandboxMode() && (!phone || !isPhoneFresh60d())) {
-        phone = '+12345678901'; // Mock US number for sandbox
+
+      // Check for missing auth methods (non-sandbox only)
+      if (!getSandboxMode()) {
+        // Note: Non-US phones can now go through the verification flow for experience
+        // The actual Apple Pay order will fail at Coinbase API level for non-US phones
+        // This allows international users to experience the flow with disclaimers
+
+        // Check if email is missing or not linked
+        if (!userEmail) {
+          const missingEmailError: any = new Error('Email verification required for Apple Pay');
+          missingEmailError.code = 'MISSING_EMAIL';
+          throw missingEmailError;
+        }
+
+        // Check if phone is missing or not linked to CDP
+        if (!cdpPhone) {
+          const missingPhoneError: any = new Error('Phone verification required for Apple Pay');
+          missingPhoneError.code = 'MISSING_PHONE';
+          throw missingPhoneError;
+        }
+
+        // Check if CDP phone matches verified phone AND is fresh (60 days)
+        if (phone !== cdpPhone || !isPhoneFresh60d()) {
+          console.log('🚫 [APPLE PAY] Phone verification failed:', {
+            phoneMatch: phone === cdpPhone,
+            isFresh: isPhoneFresh60d()
+          });
+          const missingPhoneError: any = new Error('Phone verification required for Apple Pay. Please verify your phone on the Profile page.');
+          missingPhoneError.code = 'MISSING_PHONE';
+          throw missingPhoneError;
+        }
+      } else {
+        console.log('🧪 [APPLE PAY] Sandbox mode - skipping phone validation');
+
+        // CRITICAL: Apple Pay is US-only, so always use TEST_ACCOUNTS US phone in sandbox
+        // This allows international users to test Apple Pay flow
+        phone = TEST_ACCOUNTS.phone; // US phone: +12345678901
         phoneAt = Date.now();
-      } else if (!phone || !isPhoneFresh60d()) {
-        throw new Error('Phone not verified or expired');
+        console.log('🧪 [APPLE PAY] Using TEST_ACCOUNTS US phone for sandbox:', phone);
+      }
+
+      // Production: require fresh phone verification
+      if (!getSandboxMode() && (!phone || !isPhoneFresh60d())) {
+        const phoneExpiredError: any = new Error('Phone verification has expired. Please re-verify your phone to continue with Apple Pay.');
+        phoneExpiredError.code = 'PHONE_EXPIRED';
+        throw phoneExpiredError;
       }
 
       // CRITICAL: For EVM networks (Base, Ethereum), MUST use Smart Account
@@ -169,6 +228,7 @@ export function useOnramp() {
       const isSandbox = getSandboxMode();
 
       let destinationAddress = formData.address;
+
       if (!isSandbox && isEvmNetwork) {
         // TestFlight reviewers use hardcoded address as their "smart account"
         const isTestFlight = isTestSessionActive();
@@ -192,7 +252,7 @@ export function useOnramp() {
         paymentMethod: "GUEST_CHECKOUT_APPLE_PAY",
         destinationNetwork: networkName,
         destinationAddress: destinationAddress,
-        email: userEmail,
+        email: userEmail || 'noemail@test.com', // Fallback (should never happen due to validation above)
         phoneNumber: phone,
         phoneNumberVerifiedAt: new Date(phoneAt!).toISOString(),
         partnerUserRef: partnerUserRef,
@@ -201,8 +261,6 @@ export function useOnramp() {
         isQuote: false
       });
 
-      // Handle successful response (maybe navigate to next screen, show success, etc.)
-      console.log('Success:', result);
 
       // Extract hosted URL and show WebView
       if (result.hostedUrl) {
@@ -213,8 +271,11 @@ export function useOnramp() {
       }
       
     
-    } catch (error) {
-      console.error('API Error:', error);
+    } catch (error: any) {
+      // Don't log expected validation errors (they're handled gracefully by the UI)
+      if (error?.code !== 'MISSING_EMAIL' && error?.code !== 'MISSING_PHONE') {
+        console.error('API Error:', error);
+      }
       setIsProcessingPayment(false);
       throw error;
     }
@@ -256,9 +317,21 @@ export function useOnramp() {
 
       // CRITICAL: For EVM networks, MUST use Smart Account (same as Apple Pay)
       const isEvmNetwork = ['base', 'ethereum', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'linea', 'zksync'].includes(networkName.toLowerCase());
+      const isSolanaNetwork = networkName.toLowerCase().includes('solana');
       const isSandbox = getSandboxMode();
 
       let destinationAddress = formData.address;
+
+      console.log('🎯 [WIDGET SESSION] Address before processing:', {
+        formDataAddress: formData.address,
+        network: networkName,
+        isEvmNetwork,
+        isSolanaNetwork,
+        isSandbox,
+        currentUserSolana: currentUser?.solanaAccounts?.[0],
+        currentUserEvm: currentUser?.evmSmartAccounts?.[0]
+      });
+
       if (!isSandbox && isEvmNetwork) {
         // TestFlight reviewers use hardcoded address as their "smart account"
         const isTestFlight = isTestSessionActive();
@@ -271,6 +344,18 @@ export function useOnramp() {
         }
         destinationAddress = smartAccount;
         console.log('🔒 [ONRAMP] Using Smart Account for EVM widget transaction:', smartAccount);
+      } else if (!isSandbox && isSolanaNetwork) {
+        // For Solana in production, use real Solana address from CDP
+        const isTestFlight = isTestSessionActive();
+        const solanaAddress = isTestFlight
+          ? TEST_ACCOUNTS.wallets.solana  // TestFlight: Use hardcoded address
+          : (currentUser?.solanaAccounts?.[0] as string); // Real users: Use CDP Solana Account
+
+        if (!solanaAddress) {
+          throw new Error('Solana account required for Solana onramp transactions. Please ensure your Embedded Wallet is properly initialized.');
+        }
+        destinationAddress = solanaAddress;
+        console.log('🔒 [ONRAMP] Using Solana Account for Solana widget transaction:', solanaAddress);
       }
 
       // Auth handled by authenticatedFetch
@@ -286,7 +371,10 @@ export function useOnramp() {
       });
 
       let url = res?.session?.onrampUrl;
-      if (getSandboxMode() && url) {
+      const isTestSession = isTestSessionActive();
+
+      // Replace URL for sandbox mode OR test accounts
+      if ((getSandboxMode() || isTestSession) && url) {
         url = url.replace('pay.coinbase.com', 'pay-sandbox.coinbase.com');
       }
 
@@ -465,5 +553,8 @@ export function useOnramp() {
     setTransactionStatus,
     setIsProcessingPayment,
     fetchQuote,
+    // Helpers
+    getNetworkNameFromDisplayName,
+    getAssetSymbolFromName,
   };
 }

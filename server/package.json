@@ -18,8 +18,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
     "redis": "^5.9.0",
-    "twilio": "^5.9.0",
     "undici": "^7.16.0",
     "zod": "^4.1.1"
   },

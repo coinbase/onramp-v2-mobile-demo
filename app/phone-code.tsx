@@ -3,11 +3,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { CoinbaseAlert } from '../components/ui/CoinbaseAlerts';
-import { BASE_URL } from '../constants/BASE_URL';
 import { COLORS } from '../constants/Colors';
 import { TEST_ACCOUNTS } from '../constants/TestAccounts';
-import { authenticatedFetch } from '../utils/authenticatedFetch';
-import { setVerifiedPhone } from '../utils/sharedState';
+import { setVerifiedPhone, setCurrentWalletAddress, setCurrentSolanaAddress, setTestSession } from '../utils/sharedState';
+import { useCurrentUser, useVerifySmsOTP, useSignInWithSms, useLinkSms, useIsInitialized } from '@coinbase/cdp-hooks';
 
 const { DARK_BG, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BORDER, BLUE, WHITE } = COLORS;
 const RESEND_SECONDS = 30;
@@ -16,6 +15,8 @@ export default function PhoneCodeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const phone = params.phone as string;
+  const flowId = params.flowId as string;
+  const mode = (params.mode as 'signin' | 'link' | 'reverify') || 'link'; // Default to link for backwards compat
 
   const [code, setCode] = useState('');
   const [verifying, setVerifying] = useState(false);
@@ -24,6 +25,13 @@ export default function PhoneCodeScreen() {
   const [alert, setAlert] = useState<{visible:boolean; title:string; message:string; type:'success'|'error'|'info'}>({
     visible:false, title:'', message:'', type:'info'
   });
+
+  // CDP hooks - use different hook based on mode (use same verify hook for both)
+  const { verifySmsOTP } = useVerifySmsOTP();
+  const { signInWithSms } = useSignInWithSms();
+  const { linkSms } = useLinkSms();
+  const { isInitialized } = useIsInitialized();
+  const { currentUser } = useCurrentUser();
 
   const canResend = resendSeconds <= 0 && !sending && !verifying;
 
@@ -34,27 +42,43 @@ export default function PhoneCodeScreen() {
   }, [resendSeconds]);
 
   const resendCode = async () => {
+    // Skip resend for test accounts
+    if (phone === TEST_ACCOUNTS.phone) {
+      setResendSeconds(RESEND_SECONDS);
+      return;
+    }
+
     setSending(true);
     try {
-      // Auth handled by authenticatedFetch
-      console.log('📤 [SMS Resend] Sending authenticated request to backend');
+      console.log(`📤 [SMS Resend] Resending code for ${mode} flow`);
 
-      const r = await authenticatedFetch(`${BASE_URL}/auth/sms/start`, {
-        method:'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ phone })
-      }).then(res => res.json());
-
-      if (r.error) throw new Error(r.error);
+      let result;
+      if (mode === 'signin') {
+        result = await signInWithSms({ phoneNumber: phone });
+      } else {
+        result = await linkSms(phone); // linkSms takes string directly
+      }
 
       console.log('✅ [SMS Resend] SMS sent successfully');
       setResendSeconds(RESEND_SECONDS);
-    } catch (e:any) {
-      console.error('❌ [SMS Resend] Error:', e.message);
-      setAlert({ visible:true, title:'Error', message:e.message || 'Failed to resend SMS', type:'error' });
-    } finally { setSending(false); }
+    } catch (e: any) {
+      console.error('❌ [SMS Resend] Error:', e);
+
+      // Handle METHOD_ALREADY_LINKED - already linked, just reset timer
+      if (e.code === 'METHOD_ALREADY_LINKED') {
+        setResendSeconds(RESEND_SECONDS);
+        return;
+      }
+
+      setAlert({
+        visible: true,
+        title: 'Error',
+        message: e.message || 'Failed to resend SMS',
+        type: 'error'
+      });
+    } finally {
+      setSending(false);
+    }
   };
 
   const verifySms = async () => {
@@ -63,44 +87,192 @@ export default function PhoneCodeScreen() {
     try {
       // Check if this is test phone (TestFlight)
       if (phone === TEST_ACCOUNTS.phone) {
-        console.log('🧪 Test phone detected, using mock verification');
+        console.log(`🧪 Test phone detected, using mock verification (mode: ${mode})`);
 
         if (code !== TEST_ACCOUNTS.smsCode) {
           throw new Error(`Test SMS code must be: ${TEST_ACCOUNTS.smsCode}`);
         }
 
-        // Store test phone with 60-day expiry (same as real flow)
-        await setVerifiedPhone(phone);
-        router.dismissAll();
+        if (mode === 'signin') {
+          // Mock wallet creation for TestFlight
+          console.log('🧪 Creating test session for phone signin');
+          await setTestSession(TEST_ACCOUNTS.wallets.evm, TEST_ACCOUNTS.wallets.solana);
+          setCurrentWalletAddress(TEST_ACCOUNTS.wallets.evm);
+          setCurrentSolanaAddress(TEST_ACCOUNTS.wallets.solana);
+          await setVerifiedPhone(phone, TEST_ACCOUNTS.userId);
+          router.replace('/(tabs)');
+        } else if (mode === 'reverify') {
+          // Mock phone re-verification for TestFlight
+          console.log('🧪 Re-verifying test phone');
+          await setVerifiedPhone(phone, TEST_ACCOUNTS.userId);
+
+          setAlert({
+            visible: true,
+            title: 'Phone Re-verified ✅',
+            message: 'Your test phone has been re-verified and is ready for Apple Pay checkout.',
+            type: 'success'
+          });
+
+          setTimeout(() => router.dismissAll(), 1500);
+        } else {
+          // Mock phone linking for TestFlight
+          console.log('🧪 Storing test phone for linking');
+          await setVerifiedPhone(phone, TEST_ACCOUNTS.userId);
+
+          setAlert({
+            visible: true,
+            title: 'Phone Verified',
+            message: 'Your test phone has been linked to your account.',
+            type: 'success'
+          });
+
+          setTimeout(() => router.dismissAll(), 1500);
+        }
         return;
       }
 
-      // Real phone verification flow (auth handled by authenticatedFetch)
-      console.log('📤 [SMS Verify] Sending authenticated request to backend');
+      // Real phone verification flow via CDP
+      console.log(`📤 [SMS Verify] Verifying ${mode} flow`);
 
-      const r = await authenticatedFetch(`${BASE_URL}/auth/sms/verify`, {
-        method:'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ phone, code })
-      }).then(res => res.json());
+      // Use same verification hook for both signin and link
+      await verifySmsOTP({ flowId, otp: code });
 
-      if (r.error) throw new Error(r.error);
+      if (mode === 'signin') {
+        // Sign in with phone - creates wallet
+        // Wait for wallet initialization
+        console.log('⏳ Waiting for wallet creation...');
+        const maxWaitTime = 10000; // 10 second timeout
+        const startTime = Date.now();
 
-      if (r.status === 'approved' && r.valid) {
-        console.log('✅ [SMS Verify] Phone verified successfully');
-        await setVerifiedPhone(phone);
-        // Navigate back to home (or wherever you want)
-        router.dismissAll(); // This will go back to the main screen
+        while (!isInitialized) {
+          if (Date.now() - startTime > maxWaitTime) {
+            console.warn('⚠️ Wallet initialization timeout - navigating anyway');
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 200)); // Check every 200ms
+        }
+
+        // Mark phone as verified (fresh OTP = verified for 60 days)
+        // Wait a moment for currentUser to be available after sign-in
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const userId = currentUser?.userId;
+        await setVerifiedPhone(phone, userId);
+        console.log('✅ Phone sign-in successful, wallet ready, phone verified', { userId});
+
+        // Register push notifications after successful sign-in
+        // Send ping FIRST to confirm we reached this code (visible in Vercel logs)
+        fetch(`${process.env.EXPO_PUBLIC_BASE_URL}/push-tokens/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'phone-code-signin',
+            hasUserId: !!userId,
+            userId: userId,
+            timestamp: new Date().toISOString()
+          })
+        }).catch(() => {});
+
+        const { registerForPushNotifications, sendPushTokenToServer } = await import('@/utils/pushNotifications');
+        const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
+
+        try {
+          const result = await registerForPushNotifications();
+          if (result && userId) {
+            console.log('📱 [PHONE-CODE] Registering push token after sign-in:', userId);
+            await sendPushTokenToServer(result.token, userId, getAccessTokenGlobal, result.type);
+          } else {
+            console.log('⚠️ [PHONE-CODE] No push token result:', { hasResult: !!result, hasUserId: !!userId });
+          }
+        } catch (pushError) {
+          console.error('⚠️ [PHONE-CODE] Push registration failed (non-blocking):', pushError);
+        }
+
+        // Navigate to home page after successful sign-in
+        router.replace('/(tabs)');
+      } else if (mode === 'reverify') {
+        // Re-verify existing phone - just update verification timestamp
+        console.log('✅ Phone re-verified successfully (already linked)');
+        await setVerifiedPhone(phone, currentUser?.userId);
+
+        // Show success message
+        setAlert({
+          visible: true,
+          title: 'Phone Re-verified ✅',
+          message: 'Your phone number has been re-verified and is ready for Apple Pay checkout.',
+          type: 'success'
+        });
+
+        setTimeout(() => router.dismissAll(), 1500);
       } else {
-        console.warn('⚠️ [SMS Verify] Invalid code');
-        setAlert({visible:true,title:'Invalid code',message:'Please try again',type:'error'});
+        // Link phone to existing account
+        console.log('✅ Phone linked successfully');
+        await setVerifiedPhone(phone, currentUser?.userId);
+
+        // Show success message
+        setAlert({
+          visible: true,
+          title: 'Phone Verified',
+          message: 'Your phone number has been linked to your account.',
+          type: 'success'
+        });
+
+        setTimeout(() => router.dismissAll(), 1500);
       }
-    } catch (e:any) {
-      console.error('❌ [SMS Verify] Error:', e.message);
-      setAlert({visible:true,title:'Error',message:e.message || 'Verification failed',type:'error'});
-    } finally { setVerifying(false); }
+    } catch (e: any) {
+      console.error(`❌ [SMS Verify] ${mode} error:`, e);
+      console.error('Error type:', typeof e);
+      console.error('Error constructor:', e?.constructor?.name);
+      console.error('Error details:', {
+        message: e.message,
+        code: e.code,
+        status: e.status,
+        statusCode: e.statusCode,
+        correlationId: e.correlationId,
+        requestId: e.requestId,
+        cause: e.cause,
+        response: e.response,
+        data: e.data
+      });
+
+      // Try to log wrapped errors
+      if (e.cause) {
+        console.error('Original error cause:', e.cause);
+      }
+
+      // Build comprehensive error message
+      let errorMessage = e.message || 'Invalid code. Please try again.';
+
+      // Add all error properties to the message
+      const errorDetails: string[] = [];
+      if (e.code) errorDetails.push(`Code: ${e.code}`);
+      if (e.status) errorDetails.push(`Status: ${e.status}`);
+      if (e.statusCode) errorDetails.push(`Status Code: ${e.statusCode}`);
+      if (e.correlationId) errorDetails.push(`Correlation ID: ${e.correlationId}`);
+      if (e.requestId) errorDetails.push(`Request ID: ${e.requestId}`);
+
+      // Try to stringify the entire error object
+      try {
+        const errorJson = JSON.stringify(e, null, 2);
+        if (errorJson !== '{}') {
+          errorDetails.push(`\nFull Error:\n${errorJson}`);
+        }
+      } catch (jsonError) {
+        // Ignore JSON stringify errors
+      }
+
+      if (errorDetails.length > 0) {
+        errorMessage += '\n\n' + errorDetails.join('\n');
+      }
+
+      setAlert({
+        visible: true,
+        title: 'Verification Failed',
+        message: errorMessage,
+        type: 'error'
+      });
+    } finally {
+      setVerifying(false);
+    }
   };
 
   return (
@@ -121,9 +293,15 @@ export default function PhoneCodeScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.stepContainer}>
-            <Text style={styles.title}>Verify your phone</Text>
+            <Text style={styles.title}>
+              {mode === 'signin' ? 'Verify your phone' : mode === 'reverify' ? 'Re-verify your phone' : 'Link your phone'}
+            </Text>
             <Text style={styles.subtitle}>
-              Please enter the verification code we texted you to continue.
+              {mode === 'signin'
+                ? `Please enter the verification code we texted to ${phone || 'your phone'}.`
+                : mode === 'reverify'
+                ? `Please enter the verification code we texted to ${phone || 'your phone'} to re-verify.`
+                : `Please enter the verification code we texted to ${phone || 'your phone'}.`}
             </Text>
 
             <View style={styles.codeInputContainer}>

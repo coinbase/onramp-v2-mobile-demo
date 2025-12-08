@@ -15,15 +15,21 @@ type CoinbaseAlertProps = {
   onConfirm: () => void;
   confirmText?: string;
   type?: AlertType;
+  onCancel?: () => void;
+  cancelText?: string;
+  hideButton?: boolean; // Hide the button (for non-dismissible alerts like pending transactions)
 };
 
-export function CoinbaseAlert({ 
-  visible, 
-  title, 
-  message, 
-  onConfirm, 
+export function CoinbaseAlert({
+  visible,
+  title,
+  message,
+  onConfirm,
   confirmText = "Got it",
-  type = 'success' 
+  type = 'success',
+  onCancel,
+  cancelText = "Cancel",
+  hideButton = false
 }: CoinbaseAlertProps) {
   const getIcon = () => {
     switch (type) {
@@ -81,12 +87,36 @@ export function CoinbaseAlert({
               </View>
               <Text style={styles.title}>{title}</Text>
               <Text style={styles.message}>{message}</Text>
-              <Pressable 
-                style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-                onPress={onConfirm}
-              >
-                <Text style={styles.buttonText}>{confirmText}</Text>
-              </Pressable>
+
+              {/* Show buttons unless hideButton is true */}
+              {!hideButton && (
+                <>
+                  {/* Show two buttons if onCancel is provided, otherwise single button */}
+                  {onCancel ? (
+                    <View style={styles.buttonRow}>
+                      <Pressable
+                        style={({ pressed }) => [styles.buttonSecondary, pressed && styles.buttonPressed]}
+                        onPress={onCancel}
+                      >
+                        <Text style={styles.buttonTextSecondary}>{cancelText}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [styles.buttonInRow, pressed && styles.buttonPressed]}
+                        onPress={onConfirm}
+                      >
+                        <Text style={styles.buttonText}>{confirmText}</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+                      onPress={onConfirm}
+                    >
+                      <Text style={styles.buttonText}>{confirmText}</Text>
+                    </Pressable>
+                  )}
+                </>
+              )}
             </Animated.View>
       </View>
     </Modal>
@@ -148,6 +178,13 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     paddingHorizontal: 16,
   },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    paddingHorizontal: 16,
+    justifyContent: 'space-between',
+  },
   button: {
     backgroundColor: BLUE,
     paddingHorizontal: 48,
@@ -156,12 +193,36 @@ const styles = StyleSheet.create({
     minWidth: 200,
     alignSelf: 'center',
   },
+  buttonInRow: {
+    backgroundColor: BLUE,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 25,
+    flex: 1,
+    minWidth: 120,
+  },
+  buttonSecondary: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: BORDER,
+    flex: 1,
+    minWidth: 120,
+  },
   buttonPressed: {
     opacity: 0.8,
     transform: [{ scale: 0.98 }],
   },
   buttonText: {
     color: WHITE,
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  buttonTextSecondary: {
+    color: TEXT_PRIMARY,
     fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',

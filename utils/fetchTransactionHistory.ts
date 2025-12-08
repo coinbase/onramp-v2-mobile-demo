@@ -51,10 +51,21 @@ export async function fetchTransactionHistory(
     }
 
     const responseJson = await response.json();
-    
+
+    // API returns snake_case (next_page_key), not camelCase (nextPageKey)
+    const nextPageKey = responseJson.next_page_key;
+
+    console.log('✅ [TX HISTORY] Parsed response:', {
+      transactionsCount: responseJson.transactions?.length || 0,
+      totalCount: responseJson.total_count,
+      hasNextPageKey: !!nextPageKey,
+      nextPageKey: nextPageKey,
+      responseKeys: Object.keys(responseJson)
+    });
+
     return {
       transactions: responseJson.transactions || [],
-      nextPageKey: responseJson.nextPageKey // For next page
+      nextPageKey: nextPageKey // For next page
     };
   } catch (error) {
     console.error("Transaction history API request failed:", error);
