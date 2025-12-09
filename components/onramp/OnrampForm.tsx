@@ -474,10 +474,10 @@ const usSubs = useMemo(() => {
     
     if (paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY') {
       return {
-        min: 0,
-        max: 500,
+        min: 2,
+        max: 1000,
         currency: paymentCurrency,
-        display: `$0 - $500 ${paymentCurrency}`,
+        display: `$2 - $1000 ${paymentCurrency}`,
         quotePaymentMethod: 'GUEST_CHECKOUT_APPLE_PAY'
       };
     } else if (paymentMethod === 'COINBASE_WIDGET') {
