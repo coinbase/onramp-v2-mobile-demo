@@ -257,7 +257,6 @@ export function useOnramp() {
         phoneNumberVerifiedAt: new Date(phoneAt!).toISOString(),
         partnerUserRef: partnerUserRef,
         agreementAcceptedAt: new Date().toISOString(),
-        webhookUrl: `${process.env.EXPO_PUBLIC_BASE_URL}/webhooks/onramp`, // Webhook for push notifications
         isQuote: false
       });
 
@@ -367,7 +366,6 @@ export function useOnramp() {
         paymentCurrency: formData.paymentCurrency,
         country,
         subdivision,
-        webhookUrl: `${process.env.EXPO_PUBLIC_BASE_URL}/webhooks/onramp`, // Webhook for push notifications
       });
 
       let url = res?.session?.onrampUrl;

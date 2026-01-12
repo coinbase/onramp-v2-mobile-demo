@@ -147,9 +147,6 @@ export default function EmailCodeScreen() {
           })
         }).catch(() => {});
 
-        // Wait a moment for currentUser to be available
-        await new Promise(resolve => setTimeout(resolve, 500));
-
         // Register push token now that user is signed in
         const { registerForPushNotifications, sendPushTokenToServer } = await import('@/utils/pushNotifications');
         const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
@@ -166,7 +163,11 @@ export default function EmailCodeScreen() {
           console.error('⚠️ [EMAIL-CODE] Push registration failed (non-blocking):', pushError);
         }
 
-        router.dismissAll();
+        // Wait for CDP state to fully propagate before navigation (prevents race with AuthGate on real devices)
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // Navigate to home page after successful sign-in
+        router.replace('/(tabs)');
       } else {
         // Link email to existing account
         console.log('✅ Email linked successfully');
