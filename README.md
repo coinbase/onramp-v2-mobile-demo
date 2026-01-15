@@ -1,18 +1,32 @@
 # Coinbase Onramp V2 Demo App
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 
 A React Native + Expo mobile app demonstrating Coinbase's Onramp v2 API with CDP Embedded Wallets, Apple Pay integration, and real-time push notifications.
 
-![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+Install Testflight and try the mobile app using this [invite link](https://testflight.apple.com/join/s4VZYcej)!
+
+
 
 ## Features
 
 - 🔐 **Embedded Wallet**: Automatic wallet creation via CDP
 - 💳 **Multiple Payment Methods**: Apple Pay and Coinbase Widget
-- 🌐 **Multi-Network**: Base, Ethereum, Solana support
+- 🌐 **Multi-Network**: EVM networks: Base Mainnet (gasless for USDC/EURC/cbBTC via Paymaster), Base Sepolia, Ethereum Mainnet, Ethereum Sepolia; Solana networks: Solana Mainnet, Solana Devnet.
 - 🔔 **Push Notifications**: Real-time transaction updates
 - 💸 **Gasless Transfers**: Paymaster support on Base (USDC, EURC, cbBTC)
 - 📜 **Transaction History**: Complete purchase tracking
 - 🧪 **Sandbox Mode**: Test without real transactions
+
+### Video Demo
+#### Headless Apple Pay Seamless Onramp Transaction Flow
+https://github.com/user-attachments/assets/e57f32fc-fb19-4761-ac6e-a42701973e58
+
+
+#### Embedded Wallet Transfer & Export Flow
+https://github.com/user-attachments/assets/f1e5f3b3-5331-49d9-bd4e-36fd630697d9
+
+
+
 
 ## Tech Stack
 
@@ -22,6 +36,9 @@ A React Native + Expo mobile app demonstrating Coinbase's Onramp v2 API with CDP
 - CDP React Native SDK
 - Node.js/Express backend
 - Expo Notifications
+
+## Main User Sequence
+<img width="3810" height="4043" alt="Onramp Mobile V2 Demo Sequence Diagram" src="https://github.com/user-attachments/assets/662f491f-e557-4774-acb0-d6ec5157542c" />
 
 ## Quick Start
 
@@ -134,7 +151,7 @@ npx expo run:ios
 
 **Setup steps:**
 
-1. **Get a public URL** for your backend (e.g., `https://your-domain.com` or `https://abc123.ngrok.io`)
+1. **Get a public URL** for your backend (e.g., `https://your-domain.com` or `webhook.site`)
 
 2. **Update `.env`**:
    ```bash
@@ -226,6 +243,10 @@ Test without real transactions:
   └─ src/app.ts       # Express server
 ```
 
+## Architecture Diagram
+<img width="3041" height="5992" alt="Onramp Mobile Demo Architecture" src="https://github.com/user-attachments/assets/10a726f1-c031-481c-a3cb-f334c6f80cc2" />
+
+
 ## Key Concepts
 
 ### Smart Account vs EOA
@@ -236,9 +257,10 @@ The app creates two wallet types:
 
 **Important**: The app displays **Smart Account balances** only. All EVM onramp funds automatically go to the Smart Account.
 
-### Backend Proxy Pattern
+### Security Model
+#### Backend Proxy Pattern
 
-For security, API keys are **never exposed** to the client:
+For security, API keys are **never exposed** to the client. Backend signs short‑lived ES256 JWTs with CDP API keys; only the backend ever sees API secrets.
 
 ```
 Client App → Backend Proxy → Coinbase API
@@ -246,6 +268,20 @@ Client App → Backend Proxy → Coinbase API
 ```
 
 This prevents API key theft if someone inspects your app.
+
+#### User authentication
+
+Mobile client obtains a user access token from the CDP RN SDK and sends it to the backend; backend validates with the CDP End User API before calling Onramp or wallet APIs. 
+
+
+#### Webhook security 
+
+Onramp webhooks are HMAC‑signed; backend verifies signatures before processing events and sending push notifications. 
+
+#### Key & data handling 
+
+Wallet keys are managed via the CDP SDK and stored in secure device storage; transport is TLS‑only. 
+
 
 ### Gasless Transfers
 
