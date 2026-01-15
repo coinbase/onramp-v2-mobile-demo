@@ -55,7 +55,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const timer = setTimeout(() => {
         console.log('✅ [AUTH GATE] Credential loading delay complete');
         setHasCheckedAuth(true);
-      }, 2000); // 2 seconds - increased for CDP session loading
+      }, 500); // 500ms for CDP session loading
       return () => clearTimeout(timer);
     }
   }, [isInitialized]);

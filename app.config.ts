@@ -4,14 +4,14 @@ import { ExpoConfig } from 'expo/config';
 const config: ExpoConfig = {
     name: 'Onramp V2 Demo',
     slug: 'onramp-v2-demo',
-    version: '1.0.0',
+    version: '1.1.0',
     scheme: 'onrampdemo',
     userInterfaceStyle: 'automatic',
     newArchEnabled: false,
-    icon: './assets/images/icon.png',
+    icon: './assets/images/onrampV2Icon.png',
 
     ios: {
-      bundleIdentifier: 'com.coinbase.cdp-onramp', 
+      bundleIdentifier: 'com.coinbase.cdp-onramp',
       buildNumber: process.env.IOS_BUILD_NUMBER ?? '1.0.0', // bump each submit
       supportsTablet: false,
       infoPlist: {

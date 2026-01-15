@@ -652,11 +652,14 @@ app.post('/push-tokens', async (req, res) => {
     }
 
     // Security: Verify the authenticated user matches the userId they're trying to register
-    if (req.userId !== userId) {
+    // Allow both exact match AND sandbox-prefixed version (for webhook matching)
+    const isValidUser = req.userId === userId || `sandbox-${req.userId}` === userId;
+    if (!isValidUser) {
       console.error('❌ [PUSH] Unauthorized token registration attempt:', {
         tokenUserId: req.userId,
         requestUserId: userId,
-        match: req.userId === userId
+        match: req.userId === userId,
+        sandboxMatch: `sandbox-${req.userId}` === userId
       });
       return res.status(403).json({ error: 'Forbidden: Cannot register push token for another user' });
     }
@@ -669,12 +672,16 @@ app.post('/push-tokens', async (req, res) => {
     };
 
     // Store in database (production) or in-memory (local dev)
+    // Store for BOTH regular userId AND sandbox-prefixed userId
+    // This ensures webhooks with "sandbox-{userId}" can find the token
     if (useDatabase && database) {
       await database.set(`pushtoken:${userId}`, JSON.stringify(tokenData));
-      console.log('✅ [PUSH] Token stored in database for user:', userId);
+      await database.set(`pushtoken:sandbox-${userId}`, JSON.stringify(tokenData));
+      console.log('✅ [PUSH] Token stored in database for user:', userId, 'and sandbox-' + userId);
     } else {
       pushTokenStore.set(userId, tokenData);
-      console.log('✅ [PUSH] Token stored in memory for user:', userId);
+      pushTokenStore.set(`sandbox-${userId}`, tokenData);
+      console.log('✅ [PUSH] Token stored in memory for user:', userId, 'and sandbox-' + userId);
       console.log('📊 [PUSH] Total tokens in store:', pushTokenStore.size);
     }
 

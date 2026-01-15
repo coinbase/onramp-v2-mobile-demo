@@ -650,6 +650,9 @@ const usSubs = useMemo(() => {
             <Text style={styles.limitsText}>
               {limits.display}
             </Text>
+            <Text style={[styles.limitsText, { marginTop: 4, fontStyle: 'italic' }]}>
+              Up to $5 USD per transaction for demo purposes
+            </Text>
           </View>
         ) : null}
       </View>
