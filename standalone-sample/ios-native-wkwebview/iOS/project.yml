@@ -1,0 +1,20 @@
+name: CoinbaseApplePayDemo
+options:
+  bundleIdPrefix: com.coinbase.demo
+  deploymentTarget:
+    iOS: 14.0
+targets:
+  CoinbaseApplePayDemo:
+    type: application
+    platform: iOS
+    sources:
+      - path: .
+        excludes:
+          - "*.md"
+          - "*.yml"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coinbase.demo.applepay
+        INFOPLIST_FILE: Info.plist
+        DEVELOPMENT_TEAM: "" # Add your team ID here
+        CODE_SIGN_STYLE: Automatic

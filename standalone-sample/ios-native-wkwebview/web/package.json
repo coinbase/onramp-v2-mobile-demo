@@ -1,0 +1,26 @@
+{
+  "name": "coinbase-applepay-web",
+  "version": "1.0.0",
+  "description": "React web app for Coinbase Apple Pay loaded in iOS WKWebView",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "keywords": [
+    "coinbase",
+    "apple-pay",
+    "ios",
+    "wkwebview"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@coinbase/cdp-sdk": "^1.43.0",
+    "@coinbase/coinbase-sdk": "^0.25.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  }
+}

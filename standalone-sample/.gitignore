@@ -1,0 +1,14 @@
+# Override parent gitignore - we want to track iOS folder in this standalone sample
+!ios/
+!*/ios/
+
+# But still ignore these
+node_modules/
+.env
+*.log
+.DS_Store
+
+# Xcode - users will generate this with XcodeGen
+*.xcodeproj/
+xcuserdata/
+*.xcworkspace/
