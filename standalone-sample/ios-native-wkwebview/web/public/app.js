@@ -10,8 +10,17 @@ let events = [];
 
 // Listen for postMessage events from Coinbase iframe
 window.addEventListener('message', (event) => {
-    // Only accept messages from Coinbase
-    if (!event.origin.includes('coinbase.com')) return;
+    // Only accept messages from Coinbase domains
+    try {
+        const originUrl = new URL(event.origin);
+        const allowedHosts = ['pay.coinbase.com', 'coinbase.com'];
+        const isAllowed = allowedHosts.some(host =>
+            originUrl.hostname === host || originUrl.hostname.endsWith('.' + host)
+        );
+        if (!isAllowed) return;
+    } catch (e) {
+        return; // Invalid origin URL
+    }
 
     try {
         const data = typeof event.data === 'string'
@@ -174,10 +183,17 @@ function logEvent(message, type = 'info') {
     const timestamp = new Date().toLocaleTimeString();
     const eventDiv = document.createElement('div');
     eventDiv.className = `event ${type}`;
-    eventDiv.innerHTML = `
-        <div class="event-time">${timestamp}</div>
-        <div class="event-name">${message}</div>
-    `;
+
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'event-time';
+    timeDiv.textContent = timestamp;
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'event-name';
+    nameDiv.textContent = message;
+
+    eventDiv.appendChild(timeDiv);
+    eventDiv.appendChild(nameDiv);
 
     eventsContainer.appendChild(eventDiv);
     eventsContainer.scrollTop = eventsContainer.scrollHeight;

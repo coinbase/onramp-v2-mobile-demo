@@ -365,11 +365,21 @@ extension ViewController: WKNavigationDelegate {
 
             // Listen for postMessage from iframe
             window.addEventListener('message', function(event) {
-                if (event.origin.includes('coinbase.com')) {
-                    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
-                        window.webkit.messageHandlers.onramp.postMessage(data);
-                    }
+                // Validate origin is from Coinbase
+                try {
+                    const originUrl = new URL(event.origin);
+                    const allowedHosts = ['pay.coinbase.com', 'coinbase.com'];
+                    const isAllowed = allowedHosts.some(host =>
+                        originUrl.hostname === host || originUrl.hostname.endsWith('.' + host)
+                    );
+                    if (!isAllowed) return;
+                } catch (e) {
+                    return;
+                }
+
+                const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
+                    window.webkit.messageHandlers.onramp.postMessage(data);
                 }
             });
         })();
