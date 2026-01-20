@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coinbase Apple Pay - iOS Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #1652f0;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            background: #1652f0;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #0d47d1;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .events-log {
+            margin-top: 30px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .events-log h3 {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .event {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: white;
+            border-left: 4px solid #1652f0;
+            border-radius: 4px;
+        }
+
+        .event.success {
+            border-left-color: #4caf50;
+        }
+
+        .event.error {
+            border-left-color: #f44336;
+        }
+
+        .event.warning {
+            border-left-color: #ff9800;
+        }
+
+        .event-time {
+            color: #999;
+            font-size: 11px;
+        }
+
+        .event-name {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .note {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        #paymentIframe {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Coinbase Apple Pay Demo</h1>
+        <p class="subtitle">iOS WKWebView Integration Test</p>
+
+        <form id="paymentForm">
+            <div class="form-group">
+                <label for="amount">Amount (USD)</label>
+                <input type="number" id="amount" value="20" min="20" required>
+            </div>
+
+            <div class="form-group">
+                <label for="currency">Asset</label>
+                <select id="currency">
+                    <option value="USDC">USDC</option>
+                    <option value="ETH">ETH</option>
+                    <option value="BTC">BTC</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="network">Network</label>
+                <select id="network">
+                    <option value="base">Base</option>
+                    <option value="ethereum">Ethereum</option>
+                    <option value="polygon">Polygon</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="address">Destination Address</label>
+                <input type="text" id="address" value="0x88cF83FD9C2709cDcBe393C0862070887E29E6DE" required>
+            </div>
+
+            <button type="submit" id="payButton">Buy Crypto with Apple Pay</button>
+        </form>
+
+        <div id="status" class="status"></div>
+
+        <div class="note">
+            <strong>📱 iOS Sandbox Mode</strong><br>
+            This will create a sandbox transaction. Make sure your backend uses sandbox credentials and partnerUserRef starts with "sandbox-".
+        </div>
+
+        <iframe
+            id="paymentIframe"
+            allow="payment"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-top-navigation"
+            referrerpolicy="no-referrer"></iframe>
+
+        <div class="events-log">
+            <h3>Event Log:</h3>
+            <div id="eventsContainer">
+                <p style="color: #999; font-size: 13px;">Events will appear here...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
