@@ -150,7 +150,7 @@ class ViewController: UIViewController {
         // For this demo, we'll use a mock URL that you'll need to replace
 
         // REPLACE THIS with your actual backend endpoint that returns the payment link
-        let backendURL = "https://YOUR-NGROK-URL.ngrok-free.dev/api/create-order"
+        let backendURL = "https://verdant-rowena-sigmoidally.ngrok-free.dev/api/create-order"
 
         guard let url = URL(string: backendURL) else {
             completion(.failure(NSError(domain: "Invalid backend URL", code: -1, userInfo: nil)))
@@ -324,15 +324,20 @@ extension ViewController: WKScriptMessageHandler {
 
         guard message.name == "onramp" else { return }
 
+        // Log the type we're receiving
+        logEvent("📦 Message type: \(type(of: message.body))")
+
         // Parse the message body
         if let messageBody = message.body as? String {
             // Try parsing as JSON string
+            logEvent("🔤 Received as String, parsing JSON...")
             if let data = messageBody.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 handleMessageData(json)
             }
         } else if let messageBody = message.body as? [String: Any] {
             // Already a dictionary
+            logEvent("📘 Received as Dictionary directly")
             handleMessageData(messageBody)
         }
     }
@@ -349,23 +354,35 @@ extension ViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         logEvent("📄 WebView page loaded")
 
-        // Inject script to bridge postMessage to WKWebView
+        // IMPORTANT: JavaScript Bridge for Coinbase postMessage Events
+        // Coinbase uses standard web postMessage API, which doesn't automatically reach native iOS.
+        // This bridge adapts web events to iOS's window.webkit.messageHandlers API.
+        //
+        // Two complementary approaches:
+        // 1. postMessage override - catches direct postMessage() calls
+        // 2. message event listener - catches iframe cross-origin messages
+        //
+        // Both are needed because Coinbase's architecture uses iframes internally.
+        // Alternative: Use only #2 (less invasive but may miss some events)
+
         let bridgeScript = """
         (function() {
-            // Override window.postMessage to send to native iOS
+            // APPROACH 1: Override window.postMessage
+            // Catches direct postMessage() calls made by Coinbase's page
             const originalPostMessage = window.postMessage;
             window.postMessage = function(message, targetOrigin) {
-                // Send to native
+                // Forward to native iOS
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
                     window.webkit.messageHandlers.onramp.postMessage(message);
                 }
-                // Also call original
+                // Preserve original behavior for web compatibility
                 originalPostMessage.apply(window, arguments);
             };
 
-            // Listen for postMessage from iframe
+            // APPROACH 2: Message Event Listener
+            // Catches postMessage events crossing iframe boundaries (more common with Coinbase)
             window.addEventListener('message', function(event) {
-                // Validate origin is from Coinbase
+                // Security: Only accept messages from Coinbase domains
                 try {
                     const originUrl = new URL(event.origin);
                     const allowedHosts = ['pay.coinbase.com', 'coinbase.com'];
@@ -374,9 +391,10 @@ extension ViewController: WKNavigationDelegate {
                     );
                     if (!isAllowed) return;
                 } catch (e) {
-                    return;
+                    return; // Invalid origin URL
                 }
 
+                // Parse and forward to native iOS
                 const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
                     window.webkit.messageHandlers.onramp.postMessage(data);
