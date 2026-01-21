@@ -150,7 +150,7 @@ class ViewController: UIViewController {
         // For this demo, we'll use a mock URL that you'll need to replace
 
         // REPLACE THIS with your actual backend endpoint that returns the payment link
-        let backendURL = "https://YOUR-NGROK-URL.ngrok-free.dev/api/create-order"
+        let backendURL = "https://verdant-rowena-sigmoidally.ngrok-free.dev/api/create-order"
 
         guard let url = URL(string: backendURL) else {
             completion(.failure(NSError(domain: "Invalid backend URL", code: -1, userInfo: nil)))
@@ -324,15 +324,21 @@ extension ViewController: WKScriptMessageHandler {
 
         guard message.name == "onramp" else { return }
 
+        // Log the type we're receiving
+        logEvent("📦 Message type: \(type(of: message.body))")
+
         // Parse the message body
+        // With postMessage override, messages arrive as JSON strings
         if let messageBody = message.body as? String {
-            // Try parsing as JSON string
+            // Parse JSON string (standard format from postMessage override)
+            logEvent("🔤 Received as String, parsing JSON...")
             if let data = messageBody.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 handleMessageData(json)
             }
         } else if let messageBody = message.body as? [String: Any] {
-            // Already a dictionary
+            // Fallback for Dictionary format (used by event listener approach if enabled)
+            logEvent("📘 Received as Dictionary directly")
             handleMessageData(messageBody)
         }
     }
@@ -349,23 +355,44 @@ extension ViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         logEvent("📄 WebView page loaded")
 
-        // Inject script to bridge postMessage to WKWebView
+        // JavaScript Bridge for Coinbase postMessage Events
+        // Coinbase uses the standard web postMessage API, which doesn't automatically reach native iOS.
+        // This bridge forwards those events to iOS via window.webkit.messageHandlers.
+
         let bridgeScript = """
         (function() {
-            // Override window.postMessage to send to native iOS
+            // Override window.postMessage to forward events to native iOS
+            // This intercepts postMessage calls at the source (single capture point)
             const originalPostMessage = window.postMessage;
             window.postMessage = function(message, targetOrigin) {
-                // Send to native
+                // Forward to native iOS via WKWebView message handler
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
                     window.webkit.messageHandlers.onramp.postMessage(message);
                 }
-                // Also call original
+                // Preserve original web behavior
                 originalPostMessage.apply(window, arguments);
             };
 
-            // Listen for postMessage from iframe
+            /*
+            // ALTERNATIVE APPROACH (WILL NOT WORK): Message Event Listener
+            //
+            // This approach listens for postMessage events as they cross iframe boundaries.
+            // However, due to Coinbase's nested iframe architecture, the same event may be
+            // captured multiple times as it propagates through iframe levels, causing:
+            // - Duplicate event processing
+            // - Race conditions in payment flow
+            // - Potential spurious cancel events
+            //
+            // The postMessage override above is preferred as it captures each event exactly
+            // once at its source, avoiding duplicates.
+            //
+            // Only consider this approach if:
+            // - The override doesn't work in your environment
+            // - You need to capture cross-origin iframe messages specifically
+            // - You implement deduplication logic on the native side
+            //
             window.addEventListener('message', function(event) {
-                // Validate origin is from Coinbase
+                // Verify message origin
                 try {
                     const originUrl = new URL(event.origin);
                     const allowedHosts = ['pay.coinbase.com', 'coinbase.com'];
@@ -382,6 +409,7 @@ extension ViewController: WKNavigationDelegate {
                     window.webkit.messageHandlers.onramp.postMessage(data);
                 }
             });
+            */
         })();
         """
 

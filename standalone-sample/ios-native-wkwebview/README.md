@@ -115,7 +115,7 @@ The app listens for these events via `WKScriptMessageHandler`:
 
 - See all events [here](https://docs.cdp.coinbase.com/onramp-&-offramp/onramp-apis/apple-pay-onramp-api#post-message-events)
 
-See `ViewController.swift` lines 357-437 for full implementation.
+See `ViewController.swift` lines 357-410 for full implementation.
 
 ## Sandbox Testing
 
