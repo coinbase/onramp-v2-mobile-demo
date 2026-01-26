@@ -89,14 +89,16 @@ class ViewController: UIViewController {
         let configuration = WKWebViewConfiguration()
         configuration.preferences.javaScriptEnabled = true
 
-        // IMPORTANT: Set up message handler for postMessage events
+        // IMPORTANT: Set up message handler for Coinbase events
+        // Coinbase SDK natively supports WKWebView via window.webkit.messageHandlers.cbOnramp
+        // No JavaScript injection needed - events are sent directly to this handler!
         let contentController = WKUserContentController()
-        contentController.add(self, name: "onramp")
+        contentController.add(self, name: "cbOnramp") // Handler name must be "cbOnramp"
         configuration.userContentController = contentController
 
-        // CRITICAL: These settings are required for Apple Pay to work
-        configuration.allowsInlineMediaPlayback = true
-        configuration.mediaTypesRequiringUserActionForPlayback = []
+        // These settings may be required for Apple Pay to work
+        // configuration.allowsInlineMediaPlayback = true
+        // configuration.mediaTypesRequiringUserActionForPlayback = []
 
         // Create hidden webview (will only show Apple Pay sheet, not the web page)
         webView = WKWebView(frame: .zero, configuration: configuration)
@@ -320,32 +322,16 @@ class ViewController: UIViewController {
 
 extension ViewController: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        // This is the CRITICAL bridge for receiving postMessage events from the Coinbase web page
+        // Receive events directly from Coinbase SDK via window.webkit.messageHandlers.cbOnramp
+        guard message.name == "cbOnramp" else { return }
 
-        guard message.name == "onramp" else { return }
-
-        // Log the type we're receiving
-        logEvent("📦 Message type: \(type(of: message.body))")
-
-        // Parse the message body
-        // With postMessage override, messages arrive as JSON strings
-        if let messageBody = message.body as? String {
-            // Parse JSON string (standard format from postMessage override)
-            logEvent("🔤 Received as String, parsing JSON...")
-            if let data = messageBody.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                handleMessageData(json)
-            }
-        } else if let messageBody = message.body as? [String: Any] {
-            // Fallback for Dictionary format (used by event listener approach if enabled)
-            logEvent("📘 Received as Dictionary directly")
-            handleMessageData(messageBody)
+        // Parse the message body (Coinbase sends as JSON string)
+        if let messageBody = message.body as? String,
+           let data = messageBody.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let eventName = json["eventName"] as? String {
+            handleCoinbaseEvent(eventName, data: json)
         }
-    }
-
-    private func handleMessageData(_ data: [String: Any]) {
-        guard let eventName = data["eventName"] as? String else { return }
-        handleCoinbaseEvent(eventName, data: data)
     }
 }
 
@@ -355,61 +341,28 @@ extension ViewController: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         logEvent("📄 WebView page loaded")
 
-        // JavaScript Bridge for Coinbase postMessage Events
-        // Coinbase uses the standard web postMessage API, which doesn't automatically reach native iOS.
-        // This bridge forwards those events to iOS via window.webkit.messageHandlers.
+        // ✅ NO JAVASCRIPT INJECTION NEEDED!
+        // Coinbase SDK natively detects window.webkit.messageHandlers.cbOnramp
+        // and sends events directly - no manual bridging required!
 
+        /*
+        // ============================================================================
+        // LEGACY APPROACH - Kept for reference
+        // ============================================================================
+        // Before native WKWebView support, iOS developers had to use JavaScript
+        // to bridge postMessage events to native code. This is no longer needed!
+        //
+        // Old method: Intercept window.postMessage and forward to native
+        //
         let bridgeScript = """
         (function() {
-            // Override window.postMessage to forward events to native iOS
-            // This intercepts postMessage calls at the source (single capture point)
             const originalPostMessage = window.postMessage;
             window.postMessage = function(message, targetOrigin) {
-                // Forward to native iOS via WKWebView message handler
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
                     window.webkit.messageHandlers.onramp.postMessage(message);
                 }
-                // Preserve original web behavior
                 originalPostMessage.apply(window, arguments);
             };
-
-            /*
-            // ALTERNATIVE APPROACH (WILL NOT WORK): Message Event Listener
-            //
-            // This approach listens for postMessage events as they cross iframe boundaries.
-            // However, due to Coinbase's nested iframe architecture, the same event may be
-            // captured multiple times as it propagates through iframe levels, causing:
-            // - Duplicate event processing
-            // - Race conditions in payment flow
-            // - Potential spurious cancel events
-            //
-            // The postMessage override above is preferred as it captures each event exactly
-            // once at its source, avoiding duplicates.
-            //
-            // Only consider this approach if:
-            // - The override doesn't work in your environment
-            // - You need to capture cross-origin iframe messages specifically
-            // - You implement deduplication logic on the native side
-            //
-            window.addEventListener('message', function(event) {
-                // Verify message origin
-                try {
-                    const originUrl = new URL(event.origin);
-                    const allowedHosts = ['pay.coinbase.com', 'coinbase.com'];
-                    const isAllowed = allowedHosts.some(host =>
-                        originUrl.hostname === host || originUrl.hostname.endsWith('.' + host)
-                    );
-                    if (!isAllowed) return;
-                } catch (e) {
-                    return;
-                }
-
-                const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.onramp) {
-                    window.webkit.messageHandlers.onramp.postMessage(data);
-                }
-            });
-            */
         })();
         """
 
@@ -420,6 +373,15 @@ extension ViewController: WKNavigationDelegate {
                 self?.logEvent("✅ postMessage bridge injected")
             }
         }
+        //
+        // Issues with this approach:
+        // - Extra code complexity (50+ lines of JavaScript)
+        // - Potential for race conditions if not implemented carefully
+        // - Maintenance burden for developers
+        //
+        // With native support, simply register the "cbOnramp" handler and you're done!
+        // ============================================================================
+        */
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
