@@ -30,22 +30,43 @@ import {
 import { FailedTransactionCard } from "../components/ui/FailedTransactionCard";
 import { COLORS } from "../constants/Colors";
 import { GuestCheckoutDebugInfo } from "../utils/supportEmail";
+import { getRandomBytes } from "expo-crypto";
 
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY } = COLORS;
 
-// Helper to generate realistic UUIDs
+const HEX_CHARS = "0123456789abcdef";
+
+// Helper to generate cryptographically secure random hex characters
+const getRandomHexChars = (length: number): string => {
+  const bytes = getRandomBytes(length);
+  let result = "";
+  for (let i = 0; i < length; i++) {
+    // Map each byte to a hex digit using modulo to avoid out-of-range indices
+    const idx = bytes[i] % 16;
+    result += HEX_CHARS[idx];
+  }
+  return result;
+};
+
+// Helper to generate realistic UUIDs (version 4) using secure randomness
 const generateUUID = () => {
-  const hex = '0123456789abcdef';
-  let uuid = '';
+  let uuid = "";
+  // We need 36 characters total, minus 4 hyphens and 2 fixed chars = 30 random hex chars
+  const randomHex = getRandomHexChars(30);
+  let randomIndex = 0;
+
   for (let i = 0; i < 36; i++) {
     if (i === 8 || i === 13 || i === 18 || i === 23) {
-      uuid += '-';
+      uuid += "-";
     } else if (i === 14) {
-      uuid += '4';
+      uuid += "4"; // UUID version 4
     } else if (i === 19) {
-      uuid += hex[(Math.random() * 4) | 8];
+      // Set the variant bits: 8, 9, a, or b
+      const byte = getRandomBytes(1)[0] & 0x3f; // 6 random bits
+      const variantValue = (byte % 4) + 8; // 8-11 => 8,9,a,b
+      uuid += HEX_CHARS[variantValue];
     } else {
-      uuid += hex[(Math.random() * 16) | 0];
+      uuid += randomHex[randomIndex++];
     }
   }
   return uuid;
@@ -53,12 +74,7 @@ const generateUUID = () => {
 
 // Helper to generate realistic hash (for appVersion, entityHash, etc.)
 const generateHash = (length: number = 40) => {
-  const hex = '0123456789abcdef';
-  let hash = '';
-  for (let i = 0; i < length; i++) {
-    hash += hex[(Math.random() * 16) | 0];
-  }
-  return hash;
+  return getRandomHexChars(length);
 };
 
 // Transaction interface matching Transaction Status API response
