@@ -37,6 +37,7 @@ const config: ExpoConfig = {
     plugins: [
       'expo-router',
       'expo-secure-store',
+      'expo-localization',
       ['expo-splash-screen', { image: './assets/images/splash-icon.png', imageWidth: 200, resizeMode: 'contain', backgroundColor: '#ffffff' }],
       ['expo-build-properties', { ios: { deploymentTarget: '15.1' } }],
       ['expo-notifications', {

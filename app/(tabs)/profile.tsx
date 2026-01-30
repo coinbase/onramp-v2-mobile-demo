@@ -107,6 +107,7 @@ import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { debugSecureStoreSession } from "../../utils/debugSession";
 import { clearManualAddress, clearTestSession, daysUntilExpiry, forceUnverifyPhone, formatPhoneDisplay, getManualWalletAddress, getSandboxMode, getTestWalletSol, getVerifiedPhone, getVerifiedPhoneUserId, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentSolanaAddress, setCurrentWalletAddress, setManualWalletAddress, setSandboxMode, setSubdivision, setVerifiedPhone } from "../../utils/sharedState";
+import { createGuestCheckoutDebugInfo, openSupportEmail } from "../../utils/supportEmail";
 
 const { CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BLUE, BORDER, WHITE, VIOLET, ORANGE } = COLORS;
 
@@ -1034,6 +1035,15 @@ export default function WalletScreen() {
 
                   <Pressable style={[styles.buttonSecondary]} onPress={handleSignOut}>
                     <Text style={styles.buttonTextSecondary}>Sign out</Text>
+                  </Pressable>
+
+                  {/* Support Demo Button - Full support flow demonstration */}
+                  <Pressable
+                    style={[styles.button, { backgroundColor: ORANGE }]}
+                    onPress={() => router.push('/support')}
+                  >
+                    <Ionicons name="help-circle" size={16} color={WHITE} style={{ marginRight: 8 }} />
+                    <Text style={styles.buttonText}>Support Demo</Text>
                   </Pressable>
 
                   {/* Debug Session Button - for TestFlight debugging

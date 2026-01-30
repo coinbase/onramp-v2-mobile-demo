@@ -11,6 +11,7 @@ import {
   View
 } from "react-native";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
+import { FailedTransactionBadge } from "../../components/ui/FailedTransactionCard";
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { fetchTransactionHistory } from "../../utils/fetchTransactionHistory";
@@ -20,18 +21,23 @@ import { useCurrentUser, useGetAccessToken } from "@coinbase/cdp-hooks";
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE } = COLORS;
 
 type Transaction = {
-  transaction_id: string;  
+  transaction_id: string;
   status: string;
-  payment_total: {        
+  payment_total: {
     value: string;
     currency: string;
   };
-  purchase_currency: string;  
-  purchase_network: string;   
-  created_at: string;         
-  partner_user_ref: string;   
-  wallet_address: string;     
-  tx_hash: string;           
+  purchase_currency: string;
+  purchase_network: string;
+  purchase_amount?: {
+    value: string;
+    currency: string;
+  };
+  payment_method?: string;
+  created_at: string;
+  partner_user_ref: string;
+  wallet_address: string;
+  tx_hash: string;
 };
 
 export default function History() {
@@ -184,6 +190,11 @@ export default function History() {
     return TEXT_SECONDARY; // Default gray
   };
 
+  const isFailedTransaction = (status: string) => {
+    const normalizedStatus = status.toLowerCase();
+    return normalizedStatus.includes("failed") || normalizedStatus.includes("error");
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
@@ -193,38 +204,49 @@ export default function History() {
     });
   };
 
-  const renderTransaction = ({ item }: { item: Transaction }) => (
-    <View style={styles.transactionItem}>
-      <View style={styles.transactionIcon}>
-        <Ionicons 
-          name="swap-horizontal"
-          size={16} 
-          color={WHITE}
-        />
-      </View>
-      <View style={styles.transactionContent}>
-        {/* First row: Title and Amount */}
-        <View style={styles.transactionRow}>
-          <Text style={styles.transactionTitle}>
-            {item.purchase_currency} Purchase
-          </Text>
-          <Text style={styles.transactionAmount}>
-            ${item.payment_total.value}
-          </Text>
+  const renderTransaction = ({ item }: { item: Transaction }) => {
+    const isFailed = isFailedTransaction(item.status);
+
+    return (
+      <View style={styles.transactionItem}>
+        <View style={[styles.transactionIcon, isFailed && styles.transactionIconFailed]}>
+          <Ionicons
+            name={isFailed ? "alert-circle" : "swap-horizontal"}
+            size={16}
+            color={isFailed ? "#FF6B6B" : WHITE}
+          />
         </View>
-        
-        {/* Second row: Network/Date and Status */}
-        <View style={styles.transactionRow}>
-          <Text style={styles.transactionSubtitle}>
-            {item.purchase_network} • {formatDate(item.created_at)}
-          </Text>
-          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {item.status.replace(/ONRAMP_TRANSACTION_STATUS_/g, '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
-          </Text>
+        <View style={styles.transactionContent}>
+          {/* First row: Title and Amount */}
+          <View style={styles.transactionRow}>
+            <Text style={styles.transactionTitle}>
+              {item.purchase_currency} Purchase
+            </Text>
+            <Text style={styles.transactionAmount}>
+              ${item.payment_total.value}
+            </Text>
+          </View>
+
+          {/* Second row: Network/Date and Status */}
+          <View style={styles.transactionRow}>
+            <Text style={styles.transactionSubtitle}>
+              {item.purchase_network} • {formatDate(item.created_at)}
+            </Text>
+            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+              {item.status.replace(/ONRAMP_TRANSACTION_STATUS_/g, '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
+            </Text>
+          </View>
+
+          {/* Show support badge for failed transactions */}
+          {isFailed && (
+            <View style={styles.supportBadgeRow}>
+              <FailedTransactionBadge transaction={item} />
+            </View>
+          )}
         </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -384,6 +406,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
     marginTop: 2,
+  },
+  transactionIconFailed: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  supportBadgeRow: {
+    marginTop: 8,
+    alignItems: 'flex-start',
   },
   transactionAmount: {
     fontSize: 16,
