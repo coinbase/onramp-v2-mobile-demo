@@ -6,6 +6,8 @@
 
 // UI Components
 export { SwipeToConfirm } from './ui/SwipeToConfirm';
+export { SupportEmailButton } from './ui/SupportEmailButton';
+export { FailedTransactionCard, FailedTransactionBadge } from './ui/FailedTransactionCard';
 
 
 // Onramp Components
@@ -19,6 +21,12 @@ export { useOnramp } from '../hooks/useOnramp';
 export { createApplePayOrder } from '../utils/createApplePayOrder';
 export { fetchBuyOptions } from '../utils/fetchBuyOptions';
 export { fetchTransactionHistory } from '../utils/fetchTransactionHistory';
+export {
+  openSupportEmail,
+  createDebugInfoFromTransaction,
+  createGuestCheckoutDebugInfo,
+  SUPPORT_EMAIL
+} from '../utils/supportEmail';
 
 // Types
 export type { OnrampFormData } from './onramp/OnrampForm';

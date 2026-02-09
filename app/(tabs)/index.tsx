@@ -99,6 +99,7 @@ import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { COLORS } from "../../constants/Colors";
 import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
+import { createGuestCheckoutDebugInfo, openSupportEmail, SUPPORT_EMAIL } from "../../utils/supportEmail";
 
 
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE } = COLORS;
@@ -302,6 +303,8 @@ export default function Index() {
     navigationPath?: string;
     onConfirmCallback?: () => Promise<void> | void;
     onCancelCallback?: () => void;
+    confirmText?: string;
+    cancelText?: string;
   }>({
     visible: false,
     title: '',
@@ -309,7 +312,9 @@ export default function Index() {
     type: 'info',
     navigationPath: undefined,
     onConfirmCallback: undefined,
-    onCancelCallback: undefined
+    onCancelCallback: undefined,
+    confirmText: undefined,
+    cancelText: undefined
   });
 
 
@@ -449,11 +454,21 @@ export default function Index() {
           }
         } catch (error) {
           setPendingForm(null); // Clear pending form on error
+          const errorMessage = error instanceof Error ? error.message : 'Unable to create transaction. Please try again.';
           setApplePayAlert({
             visible: true,
             title: 'Transaction Failed',
-            message: error instanceof Error ? error.message : 'Unable to create transaction. Please try again.',
-            type: 'error'
+            message: `${errorMessage}\n\nContact ${SUPPORT_EMAIL} for support.`,
+            type: 'error',
+            confirmText: 'Email Support',
+            onConfirmCallback: async () => {
+              const debugInfo = createGuestCheckoutDebugInfo({
+                errorMessage: errorMessage,
+                debugMessage: 'Transaction failed during pending form resumption',
+              });
+              await openSupportEmail(debugInfo);
+            },
+            onCancelCallback: () => {}
           });
         }
       };
@@ -669,17 +684,34 @@ export default function Index() {
         return;
       }
 
-      // Generic error
+      // Generic error - show support option
+      const errorMessage = error instanceof Error ? error.message : 'Unable to create transaction. Please try again.';
       setApplePayAlert({
         visible: true,
         title: 'Transaction Failed',
-        message: error instanceof Error ? error.message : 'Unable to create transaction. Please try again.',
-        type: 'error'
+        message: `${errorMessage}\n\nContact ${SUPPORT_EMAIL} for support. We'll resolve the issue within 1 business day.`,
+        type: 'error',
+        confirmText: 'Email Support',
+        onConfirmCallback: async () => {
+          // Open email with debug info
+          const debugInfo = createGuestCheckoutDebugInfo({
+            asset: currentTransaction?.asset,
+            network: currentTransaction?.network,
+            amount: currentTransaction?.amount,
+            currency: currentTransaction?.paymentCurrency,
+            errorMessage: errorMessage,
+            debugMessage: 'Transaction failed during submission',
+          });
+          await openSupportEmail(debugInfo);
+        },
+        onCancelCallback: () => {
+          // Just dismiss the alert
+        }
       });
       console.error('Error submitting form:', error);
       setIsProcessingPayment(false);
     }
-  }, [createOrder, createWidgetSession, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut]);
+  }, [createOrder, createWidgetSession, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction]);
     
   
   return (
@@ -764,10 +796,12 @@ export default function Index() {
         title={applePayAlert.title}
         message={applePayAlert.message}
         type={applePayAlert.type}
+        confirmText={applePayAlert.confirmText}
+        cancelText={applePayAlert.cancelText || "Dismiss"}
         onConfirm={async () => {
           const navPath = applePayAlert.navigationPath;
           const callback = applePayAlert.onConfirmCallback;
-          setApplePayAlert({ visible: false, title: '', message: '', type: 'info', navigationPath: undefined, onConfirmCallback: undefined, onCancelCallback: undefined });
+          setApplePayAlert({ visible: false, title: '', message: '', type: 'info', navigationPath: undefined, onConfirmCallback: undefined, onCancelCallback: undefined, confirmText: undefined, cancelText: undefined });
 
           // Clear transaction details after alert is dismissed
           setCurrentTransaction(null);
@@ -783,7 +817,7 @@ export default function Index() {
         }}
         onCancel={applePayAlert.onCancelCallback ? () => {
           const cancelCallback = applePayAlert.onCancelCallback;
-          setApplePayAlert({ visible: false, title: '', message: '', type: 'info', navigationPath: undefined, onConfirmCallback: undefined, onCancelCallback: undefined });
+          setApplePayAlert({ visible: false, title: '', message: '', type: 'info', navigationPath: undefined, onConfirmCallback: undefined, onCancelCallback: undefined, confirmText: undefined, cancelText: undefined });
 
           // Clear transaction details after alert is dismissed
           setCurrentTransaction(null);
