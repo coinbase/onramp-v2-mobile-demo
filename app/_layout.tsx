@@ -4,7 +4,7 @@ import { COLORS } from "../constants/Colors";
 
 import { AuthGate } from "@/components/AuthGate";
 import { AuthInitializer } from "@/components/AuthInitializer";
-import { getTestWalletEvm, getTestWalletSol, hydrateSandboxMode, hydrateTestSession, hydrateVerifiedPhone, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress } from "@/utils/sharedState";
+import { getTestWalletEvm, getTestWalletSol, hydrateSandboxMode, hydrateTestSession, hydrateVerifiedPhone, hydrateLifetimeTransactionThreshold, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress } from "@/utils/sharedState";
 import { useEffect } from "react";
 import 'react-native-get-random-values';
 import 'react-native-url-polyfill/auto';
@@ -37,6 +37,9 @@ export default function RootLayout() {
 
     // Hydrate phone verification
     hydrateVerifiedPhone().catch(() => {});
+
+    // Hydrate lifetime transaction threshold
+    hydrateLifetimeTransactionThreshold().catch(() => {});
 
     // Hydrate test session (TestFlight)
     hydrateTestSession().then(() => {

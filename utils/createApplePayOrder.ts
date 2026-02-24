@@ -36,15 +36,28 @@ export async function createApplePayOrder(payload: any) {
     const responseText = await responseClone.text().catch(() => '<non-text body>');
 
     if (!response.ok) {
-      console.error('❌ [RESPONSE] Request failed!');
-      console.error('❌ [RESPONSE] Status:', response.status);
-      console.error('❌ [RESPONSE] Body:', responseText);
-
       const errorData = await response.json().catch(() => null);
-      const errorMessage = errorData?.errorMessage
-        ? `${errorData.errorType}: ${errorData.errorMessage}`
+      const errorType = errorData?.errorType || '';
+      const errorMessage = errorData?.errorMessage || '';
+
+      // Check if this is a quote request with limit error - use console.log instead of console.error
+      const isQuoteRequest = payload.isQuote === true;
+      const isLimitError = errorType === 'guest_transaction_limit' || errorMessage.includes('exceed');
+
+      if (isQuoteRequest && isLimitError) {
+        console.log('⚠️  [QUOTE] Request blocked by user limits (expected behavior)');
+        console.log('⚠️  [QUOTE] Status:', response.status);
+        console.log('⚠️  [QUOTE] Message:', errorMessage);
+      } else {
+        console.error('❌ [RESPONSE] Request failed!');
+        console.error('❌ [RESPONSE] Status:', response.status);
+        console.error('❌ [RESPONSE] Body:', responseText);
+      }
+
+      const fullErrorMessage = errorMessage
+        ? `${errorType}: ${errorMessage}`
         : errorData?.message || `HTTP error! status: ${response.status}`;
-      throw new Error(errorMessage);
+      throw new Error(fullErrorMessage);
     }
 
     console.log('✅ [RESPONSE] Request succeeded!');

@@ -16,6 +16,8 @@ Install Testflight and try the mobile app using this [invite link](https://testf
 - 💸 **Gasless Transfers**: Paymaster support on Base (USDC, EURC, cbBTC)
 - 📜 **Transaction History**: Complete purchase tracking
 - 🧪 **Sandbox Mode**: Test without real transactions
+- 📊 **User Limits API**: Real-time weekly spending & lifetime transaction limits for Apple Pay
+- 🆘 **Failed Transaction Support**: Email support flow for failed transactions
 
 ### Video Demo
 #### Headless Apple Pay Seamless Onramp Transaction Flow

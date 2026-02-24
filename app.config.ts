@@ -7,7 +7,7 @@ const config: ExpoConfig = {
     version: '1.1.0',
     scheme: 'onrampdemo',
     userInterfaceStyle: 'automatic',
-    newArchEnabled: false,
+    newArchEnabled: true,
     icon: './assets/images/onrampV2Icon.png',
 
     ios: {

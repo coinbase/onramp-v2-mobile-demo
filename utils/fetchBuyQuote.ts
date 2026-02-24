@@ -27,32 +27,45 @@ export async function fetchBuyQuote(payload: {
   const isApplePay = payload.paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
 
   if (isApplePay) {
-    const response = await createApplePayOrder({
-      ...payload,
-      isQuote: true,
-      paymentMethod: "GUEST_CHECKOUT_APPLE_PAY",
-      email: 'testquote@test.com',
-      phoneNumber: '+12345678901',
-      agreementAcceptedAt: new Date().toISOString(),
-      phoneNumberVerifiedAt: new Date().toISOString(),
-      partnerUserRef: 'testquote',
-      destinationAddress,
-    });
-      
-    const order = response?.order ?? response;
-    
-    const coinbaseFee = order?.fees?.find((f: any) => f.type === 'FEE_TYPE_EXCHANGE');
-    const networkFee  = order?.fees?.find((f: any) => f.type === 'FEE_TYPE_NETWORK');
-    
-    return {
-      purchase_amount:  { value: order?.purchaseAmount ?? '0', currency: order?.purchaseCurrency },
-      payment_subtotal: { value: order?.paymentSubtotal ?? '0', currency: order?.paymentCurrency },
-      payment_total:    { value: order?.paymentTotal ?? '0',    currency: order?.paymentCurrency },
-      coinbase_fee:     { value: coinbaseFee?.amount ?? '0',    currency: coinbaseFee?.currency ?? order?.paymentCurrency },
-      network_fee:      { value: networkFee?.amount ?? '0',     currency: networkFee?.currency ?? order?.paymentCurrency },
-      exchange_rate:    order?.exchangeRate,
-      raw:              order,
-    };
+    try {
+      const response = await createApplePayOrder({
+        ...payload,
+        isQuote: true,
+        paymentMethod: "GUEST_CHECKOUT_APPLE_PAY",
+        email: 'testquote@test.com',
+        phoneNumber: '+12345678901',
+        agreementAcceptedAt: new Date().toISOString(),
+        phoneNumberVerifiedAt: new Date().toISOString(),
+        partnerUserRef: 'testquote',
+        destinationAddress,
+      });
+
+      const order = response?.order ?? response;
+
+      const coinbaseFee = order?.fees?.find((f: any) => f.type === 'FEE_TYPE_EXCHANGE');
+      const networkFee  = order?.fees?.find((f: any) => f.type === 'FEE_TYPE_NETWORK');
+
+      return {
+        purchase_amount:  { value: order?.purchaseAmount ?? '0', currency: order?.purchaseCurrency },
+        payment_subtotal: { value: order?.paymentSubtotal ?? '0', currency: order?.paymentCurrency },
+        payment_total:    { value: order?.paymentTotal ?? '0',    currency: order?.paymentCurrency },
+        coinbase_fee:     { value: coinbaseFee?.amount ?? '0',    currency: coinbaseFee?.currency ?? order?.paymentCurrency },
+        network_fee:      { value: networkFee?.amount ?? '0',     currency: networkFee?.currency ?? order?.paymentCurrency },
+        exchange_rate:    order?.exchangeRate,
+        raw:              order,
+      };
+    } catch (error: any) {
+      // Check if this is a guest transaction limit error
+      const errorMessage = error?.message || JSON.stringify(error);
+      if (errorMessage.includes('guest_transaction_limit') || errorMessage.includes('exceed')) {
+        console.log('⚠️  Quote fetch blocked by user limits - this is expected, limits validation will handle it');
+        // Return null to gracefully handle - the UI already shows limit validation
+        return null;
+      }
+      // For other errors, re-throw
+      console.error('❌ Error fetching Apple Pay quote:', error);
+      throw error;
+    }
   } else {
     const country = getCountry();
     const subdivision = getSubdivision();
