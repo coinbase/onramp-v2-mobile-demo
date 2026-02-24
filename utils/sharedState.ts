@@ -91,6 +91,9 @@ const PHONE_AT_KEY = 'verifiedPhoneAt';
 const PHONE_USER_KEY = 'verifiedPhoneUserId'; // Track which user verified this phone
 export const PHONE_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
 
+const LIFETIME_TX_THRESHOLD_KEY = 'lifetimeTransactionThreshold';
+const DEFAULT_LIFETIME_TX_THRESHOLD = 5;
+
 let currentPartnerUserRef: string | null = null;
 let currentWalletAddress: string | null = null;
 let currentSolanaAddress: string | null = null;
@@ -98,6 +101,8 @@ let currentSolanaAddress: string | null = null;
 let verifiedPhone: string | null = null;
 let verifiedPhoneAt: number | null = null;
 let verifiedPhoneUserId: string | null = null; // Track which user verified this phone
+
+let lifetimeTransactionThreshold: number = DEFAULT_LIFETIME_TX_THRESHOLD;
 
 let currentCountry: string = 'US';
 let currentSubdivision: string = 'CA';
@@ -326,6 +331,35 @@ export const daysUntilExpiry = () => {
   if (!verifiedPhoneAt) return -1;
   const rem = verifiedPhoneAt + PHONE_TTL_MS - Date.now();
   return Math.ceil(rem / (24 * 60 * 60 * 1000));
+};
+
+// Lifetime transaction threshold for warning notifications
+export const setLifetimeTransactionThreshold = async (threshold: number) => {
+  lifetimeTransactionThreshold = threshold;
+  await AsyncStorage.setItem(LIFETIME_TX_THRESHOLD_KEY, String(threshold));
+  console.log('✅ Lifetime transaction threshold set to:', threshold);
+};
+
+export const getLifetimeTransactionThreshold = () => lifetimeTransactionThreshold;
+
+export const hydrateLifetimeTransactionThreshold = async () => {
+  try {
+    const stored = await AsyncStorage.getItem(LIFETIME_TX_THRESHOLD_KEY);
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (!isNaN(parsed) && parsed >= 0) {
+        lifetimeTransactionThreshold = parsed;
+        console.log('🔄 Lifetime transaction threshold hydrated:', parsed);
+        return;
+      }
+    }
+    // Default if not set or invalid
+    lifetimeTransactionThreshold = DEFAULT_LIFETIME_TX_THRESHOLD;
+    console.log('ℹ️  Lifetime transaction threshold defaulted to:', DEFAULT_LIFETIME_TX_THRESHOLD);
+  } catch (error) {
+    console.error('❌ Error hydrating lifetime transaction threshold:', error);
+    lifetimeTransactionThreshold = DEFAULT_LIFETIME_TX_THRESHOLD;
+  }
 };
 
 export const formatPhoneDisplay = (phone: string | null): string => {

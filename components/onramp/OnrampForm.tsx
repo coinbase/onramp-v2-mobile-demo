@@ -88,10 +88,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { COLORS } from '../../constants/Colors';
 import { TEST_ACCOUNTS } from '../../constants/TestAccounts';
-import { getCountry, getPendingForm, getSandboxMode, getSubdivision, isTestSessionActive, setCountry, setCurrentNetwork, setSandboxMode, setSubdivision } from '../../utils/sharedState';
+import { getCountry, getLifetimeTransactionThreshold, getPendingForm, getSandboxMode, getSubdivision, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentNetwork, setSandboxMode, setSubdivision } from '../../utils/sharedState';
 import { SwipeToConfirm } from '../ui/SwipeToConfirm';
+import { fetchUserLimits, UserLimit } from '../../utils/fetchUserLimits';
+import { getAccessTokenGlobal } from '../../utils/getAccessTokenGlobal';
 
-const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE, SILVER } = COLORS;
+const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE, SILVER, ORANGE } = COLORS;
 
 export type OnrampFormData = {
   amount: string;
@@ -164,6 +166,11 @@ export function OnrampForm({
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslate = useRef(new Animated.Value(300)).current;
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
+
+  // User limits state
+  const [userLimits, setUserLimits] = useState<{ weekly: UserLimit; lifetime: UserLimit } | null>(null);
+  const [isLoadingLimits, setIsLoadingLimits] = useState(false);
+  const [limitsError, setLimitsError] = useState<string | null>(null);
   const [localSandboxEnabled, setLocalSandboxEnabled] = useState(getSandboxMode());
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
 const [subPickerVisible, setSubPickerVisible] = useState(false);
@@ -264,6 +271,49 @@ const usSubs = useMemo(() => {
 
   // For production EVM networks, must have Smart Account
   const isFormValid = isAmountValid && !!network && !!asset && hasValidAddress && (!needsSmartAccount || hasSmartAccount);
+
+  // User limits validation (Apple Pay + production mode)
+  const limitsValidation = useMemo(() => {
+    if (!userLimits || localSandboxEnabled || !isApplePay) {
+      return { isValid: true, error: null, warning: null };
+    }
+
+    const weeklyRemaining = parseFloat(userLimits.weekly.remaining);
+    const lifetimeRemaining = parseInt(userLimits.lifetime.remaining, 10);
+    const threshold = getLifetimeTransactionThreshold();
+
+    // Check lifetime = 0 (hard block)
+    if (lifetimeRemaining === 0) {
+      return {
+        isValid: false,
+        error: 'You have reached your lifetime transaction limit for Apple Pay. Please contact support.',
+        warning: null
+      };
+    }
+
+    // Check weekly limit exceeded (hard block)
+    if (isAmountValid && amountNumber > weeklyRemaining) {
+      return {
+        isValid: false,
+        error: `Amount exceeds your weekly limit. You have $${weeklyRemaining} ${userLimits.weekly.currency} remaining this week.`,
+        warning: null
+      };
+    }
+
+    // Check lifetime warning (soft warning, allow proceed)
+    if (lifetimeRemaining < threshold) {
+      return {
+        isValid: true,
+        error: null,
+        warning: `⚠️ You have ${lifetimeRemaining} transaction${lifetimeRemaining === 1 ? '' : 's'} remaining before reaching your limit.`
+      };
+    }
+
+    return { isValid: true, error: null, warning: null };
+  }, [userLimits, localSandboxEnabled, isApplePay, amountNumber, isAmountValid]);
+
+  // Update isFormValid to include user limits validation
+  const isFormValidWithLimits = isFormValid && limitsValidation.isValid;
 
   /**
    * Dynamic filtering: changing asset updates available networks, and vice versa
@@ -529,27 +579,84 @@ const usSubs = useMemo(() => {
 
   const limits = getCurrencyLimits();
 
-  // Debounced quote fetching
-  useEffect(() => {    
+  // Fetch user limits (Apple Pay only, production mode, verified phone)
+  const fetchUserLimitsData = useCallback(async () => {
+    const verifiedPhone = getVerifiedPhone();
+    const isPhoneFresh = isPhoneFresh60d();
+
+    // Only fetch if: Apple Pay + production mode + phone verified
+    if (!isApplePay || localSandboxEnabled || !verifiedPhone || !isPhoneFresh) {
+      setUserLimits(null);
+      return;
+    }
+
+    setIsLoadingLimits(true);
+    setLimitsError(null);
+
+    try {
+      const accessToken = await getAccessTokenGlobal();
+      if (!accessToken) {
+        console.warn('⚠️  No access token available for user limits');
+        setUserLimits(null);
+        setIsLoadingLimits(false);
+        return;
+      }
+
+      const response = await fetchUserLimits(verifiedPhone, accessToken);
+
+      // Parse limits into structured format
+      const weeklyLimit = response.limits.find(l => l.limitType === 'weekly_spending');
+      const lifetimeLimit = response.limits.find(l => l.limitType === 'lifetime_transactions');
+
+      if (weeklyLimit && lifetimeLimit) {
+        setUserLimits({
+          weekly: weeklyLimit,
+          lifetime: lifetimeLimit
+        });
+        console.log('✅ User limits fetched:', { weeklyLimit, lifetimeLimit });
+      } else {
+        console.warn('⚠️  Incomplete limits response:', response.limits);
+        setUserLimits(null);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching user limits:', error);
+      setLimitsError('Failed to load user limits');
+      setUserLimits(null);
+    } finally {
+      setIsLoadingLimits(false);
+    }
+  }, [isApplePay, localSandboxEnabled]);
+
+  // Fetch user limits on mount (Apple Pay + production + verified phone)
+  useEffect(() => {
+    fetchUserLimitsData();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced quote fetching and user limits fetching
+  useEffect(() => {
     const timeoutId = setTimeout(() => {
       if (amount && asset && network) {
         const limits = getCurrencyLimits();
         const quoteMethod = limits?.quotePaymentMethod || 'CARD';
-        
-        fetchQuote?.({ 
-          amount, 
-          asset, 
-          network, 
-          paymentCurrency, 
+
+        // Fetch quote
+        fetchQuote?.({
+          amount,
+          asset,
+          network,
+          paymentCurrency,
           paymentMethod: paymentMethod === 'COINBASE_WIDGET' ? quoteMethod : paymentMethod
         });
+
+        // Fetch user limits (Apple Pay + production + verified phone)
+        fetchUserLimitsData();
       } else {
         console.log('Missing required fields for quote');
       }
     }, 500);
-    
+
     return () => clearTimeout(timeoutId);
-  }, [amount, asset, network, paymentCurrency, fetchQuote, paymentMethod, getCurrencyLimits]);
+  }, [amount, asset, network, paymentCurrency, fetchQuote, paymentMethod, getCurrencyLimits, fetchUserLimitsData]);
 
   const amountError = useMemo(() => {
     if (!limits || !amount || !Number.isFinite(amountNumber)) return null;
@@ -570,7 +677,7 @@ const usSubs = useMemo(() => {
    * Validation: amount > 0, valid 0x address, asset/network selected
    */
   const handleSwipeConfirm = useCallback((reset: () => void) => {
-    if (!isFormValid) {
+    if (!isFormValidWithLimits) {
       console.log('Form is invalid or no quote, resetting slider');
       reset();
       return;
@@ -589,7 +696,7 @@ const usSubs = useMemo(() => {
       sandbox: localSandboxEnabled, // Single source of truth
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
     });
-  }, [isFormValid, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp]);
+  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp]);
   return (
     <ScrollView
       contentContainerStyle={styles.content}
@@ -645,16 +752,30 @@ const usSubs = useMemo(() => {
           {/* Show error or limits */}
           {amountError ? (
             <Text style={styles.errorText}>{amountError}</Text>
-          ) : limits ? (
+          ) : (
             <View>
-            <Text style={styles.limitsText}>
-              {limits.display}
-            </Text>
-            <Text style={[styles.limitsText, { marginTop: 4, fontStyle: 'italic' }]}>
-              Up to $5 USD per transaction for demo purposes
-            </Text>
-          </View>
-        ) : null}
+              {limits && (
+                <Text style={styles.limitsText}>
+                  {isApplePay ? 'Apple Pay limit: ' : 'Payment method limit: '}{limits.display}
+                </Text>
+              )}
+              {userLimits && !localSandboxEnabled && (
+                <Text style={styles.limitsText}>
+                  User limit: ${userLimits.weekly.remaining}/{userLimits.weekly.limit} {userLimits.weekly.currency} weekly • {userLimits.lifetime.remaining}/{userLimits.lifetime.limit} transactions remaining
+                </Text>
+              )}
+              {isLoadingLimits && !localSandboxEnabled && (
+                <Text style={[styles.limitsText, { fontStyle: 'italic', color: TEXT_SECONDARY }]}>
+                  Loading user limits...
+                </Text>
+              )}
+              {limits && (
+                <Text style={[styles.limitsText, { marginTop: 4, fontStyle: 'italic' }]}>
+                  Up to $5 USD per transaction for demo purposes
+                </Text>
+              )}
+            </View>
+          )}
       </View>
 
       {/* Receive Card */}
@@ -855,10 +976,30 @@ const usSubs = useMemo(() => {
           ) : null}
         </View>
       ) : null}
-  
+
+      {/* User Limits Error/Warning Display */}
+      {limitsValidation.error && (
+        <View style={[styles.notificationCard, styles.errorCard]}>
+          <View style={styles.notificationHeader}>
+            <Ionicons name="close-circle" size={20} color="#FF6B6B" />
+            <Text style={[styles.notificationTitle, { color: '#FF6B6B' }]}>Limit Exceeded</Text>
+          </View>
+          <Text style={styles.notificationText}>{limitsValidation.error}</Text>
+        </View>
+      )}
+      {limitsValidation.warning && !limitsValidation.error && (
+        <View style={[styles.notificationCard, { borderLeftWidth: 4, borderLeftColor: ORANGE, backgroundColor: ORANGE + '08' }]}>
+          <View style={styles.notificationHeader}>
+            <Ionicons name="warning" size={20} color={ORANGE} />
+            <Text style={[styles.notificationTitle, { color: ORANGE }]}>Low Transaction Limit</Text>
+          </View>
+          <Text style={styles.notificationText}>{limitsValidation.warning}</Text>
+        </View>
+      )}
+
       <SwipeToConfirm
         label="Swipe to Deposit"
-        disabled={!isFormValid}
+        disabled={!isFormValidWithLimits}
         onConfirm={handleSwipeConfirm}
         isLoading={isLoading}
         onSwipeStart={() => setIsSwipeActive(true)}

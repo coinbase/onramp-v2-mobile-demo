@@ -106,8 +106,7 @@ import { BASE_URL } from "../../constants/BASE_URL";
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { debugSecureStoreSession } from "../../utils/debugSession";
-import { clearManualAddress, clearTestSession, daysUntilExpiry, forceUnverifyPhone, formatPhoneDisplay, getManualWalletAddress, getSandboxMode, getTestWalletSol, getVerifiedPhone, getVerifiedPhoneUserId, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentSolanaAddress, setCurrentWalletAddress, setManualWalletAddress, setSandboxMode, setSubdivision, setVerifiedPhone } from "../../utils/sharedState";
-import { createGuestCheckoutDebugInfo, openSupportEmail } from "../../utils/supportEmail";
+import { clearManualAddress, clearTestSession, daysUntilExpiry, forceUnverifyPhone, formatPhoneDisplay, getLifetimeTransactionThreshold, getManualWalletAddress, getSandboxMode, getTestWalletSol, getVerifiedPhone, getVerifiedPhoneUserId, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentSolanaAddress, setCurrentWalletAddress, setLifetimeTransactionThreshold, setManualWalletAddress, setSandboxMode, setSubdivision, setVerifiedPhone } from "../../utils/sharedState";
 
 const { CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BLUE, BORDER, WHITE, VIOLET, ORANGE } = COLORS;
 
@@ -224,6 +223,7 @@ export default function WalletScreen() {
   const sandboxEnabled = getSandboxMode();
   const [localSandboxEnabled, setLocalSandboxEnabled] = useState(getSandboxMode());
   const [manualAddress, setManualAddress] = useState('');
+  const [lifetimeTxThreshold, setLifetimeTxThresholdLocal] = useState(getLifetimeTransactionThreshold());
 
   // Balance state
   const [balances, setBalances] = useState<any[]>([]);
@@ -257,6 +257,11 @@ export default function WalletScreen() {
       setManualWalletAddress(null);
     }
   }, [manualAddress, localSandboxEnabled]);
+
+  // Save lifetime transaction threshold when changed
+  useEffect(() => {
+    setLifetimeTransactionThreshold(lifetimeTxThreshold);
+  }, [lifetimeTxThreshold]);
 
   const openPhoneVerify = useCallback(async () => {
     // Use test phone for TestFlight, real phone for production
@@ -724,13 +729,17 @@ export default function WalletScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+    >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollView
           style={{ flex: 1, backgroundColor: CARD_BG }}
-          contentContainerStyle={{ padding: 20, gap: 24}}
+          contentContainerStyle={{ padding: 20, gap: 24, paddingBottom: 40 }}
           keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="always"
+          keyboardShouldPersistTaps="handled"
           bounces={true}
           overScrollMode="always"
           showsVerticalScrollIndicator={true}
@@ -1413,6 +1422,38 @@ export default function WalletScreen() {
               </View>
             )}
 
+
+            {/* Onramp Settings Card */}
+            <View style={styles.card}>
+              <Text style={styles.rowLabel}>Onramp Settings</Text>
+
+              <View style={styles.subBox}>
+                <Text style={styles.subHint}>Lifetime Transaction Limit Warning</Text>
+                <Text style={styles.helper}>
+                  Get a reminder when your remaining Apple Pay onramp transactions fall below this threshold
+                </Text>
+                <View style={styles.inputContainer}>
+                  <Text style={[styles.subValue, { marginRight: 12 }]}>Remind me when below:</Text>
+                  <TextInput
+                    style={[styles.input, { flex: 0, minWidth: 60, textAlign: 'center' }]}
+                    value={String(lifetimeTxThreshold)}
+                    onChangeText={(text) => {
+                      const num = parseInt(text, 10);
+                      if (!isNaN(num) && num >= 0 && num <= 99) {
+                        setLifetimeTxThresholdLocal(num);
+                      } else if (text === '') {
+                        setLifetimeTxThresholdLocal(0);
+                      }
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    placeholder="5"
+                    placeholderTextColor={TEXT_SECONDARY}
+                  />
+                  <Text style={[styles.subValue, { marginLeft: 12 }]}>transactions</Text>
+                </View>
+              </View>
+            </View>
 
             {/* Sandbox Wallet Card - show when sandbox mode is enabled */}
             {localSandboxEnabled && (
