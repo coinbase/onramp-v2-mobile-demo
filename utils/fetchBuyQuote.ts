@@ -1,9 +1,9 @@
 
 import { BASE_URL } from '@/constants/BASE_URL';
 import { authenticatedFetch } from './authenticatedFetch';
-import { createApplePayOrder } from './createApplePayOrder';
+import { createGuestCheckoutOrder } from './createGuestCheckoutOrder';
 import { demoAddressForNetwork } from './randomAddresses';
-import { getCountry, getSubdivision, getCurrentWalletAddress, getSandboxMode } from './sharedState';
+import { getCountry, getCurrentWalletAddress, getSandboxMode, getSubdivision } from './sharedState';
 
 export async function fetchBuyQuote(payload: {
   paymentCurrency: string;
@@ -24,19 +24,20 @@ export async function fetchBuyQuote(payload: {
     return null;
   }
 
-  const isApplePay = payload.paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
+  const isGuestCheckout = payload.paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY'
+    || payload.paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
 
-  if (isApplePay) {
+  if (isGuestCheckout) {
     try {
-      const response = await createApplePayOrder({
+      const response = await createGuestCheckoutOrder({
         ...payload,
-        isQuote: true,
-        paymentMethod: "GUEST_CHECKOUT_APPLE_PAY",
+        isQuote: false,
+        paymentMethod: payload.paymentMethod,
         email: 'testquote@test.com',
         phoneNumber: '+12345678901',
         agreementAcceptedAt: new Date().toISOString(),
         phoneNumberVerifiedAt: new Date().toISOString(),
-        partnerUserRef: 'testquote',
+        partnerUserRef: isSandbox ? 'sandbox-HSAHDSBDFH' : 'HSAHDSBDFH',
         destinationAddress,
       });
 
@@ -62,8 +63,8 @@ export async function fetchBuyQuote(payload: {
         // Return null to gracefully handle - the UI already shows limit validation
         return null;
       }
-      // For other errors, re-throw
-      console.error('❌ Error fetching Apple Pay quote:', error);
+      const label = payload.paymentMethod?.includes('GOOGLE') ? 'Google Pay' : 'Apple Pay';
+      console.error(`❌ Error fetching ${label} quote:`, error);
       throw error;
     }
   } else {

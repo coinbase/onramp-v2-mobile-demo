@@ -6,7 +6,7 @@
  * This is the main page where users purchase crypto. It coordinates:
  * - OnrampForm component (user input)
  * - useOnramp hook (API calls)
- * - ApplePayWidget component (payment processing)
+ * - APIGuestCheckoutWidget component (Apple Pay / Google Pay payment processing)
  * - Wallet connection state
  *
  * ADDRESS STATE MANAGEMENT (Critical for UX):
@@ -85,7 +85,7 @@
  * - Network changes (switch between EVM/SOL)
  *
  * @see components/onramp/OnrampForm.tsx for form UI
- * @see components/onramp/ApplePayWidget.tsx for payment WebView
+ * @see components/onramp/APIGuestCheckoutWidget.tsx for payment WebView
  * @see hooks/useOnramp.ts for API calls
  * @see utils/sharedState.ts for address resolution
  */
@@ -94,11 +94,11 @@ import { useCurrentUser, useEvmAddress, useIsSignedIn, useSignOut, useSolanaAddr
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { ApplePayWidget, OnrampForm, useOnramp } from "../../components";
+import { APIGuestCheckoutWidget, OnrampForm, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { COLORS } from "../../constants/Colors";
-import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
+import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
 import { createGuestCheckoutDebugInfo, openSupportEmail, SUPPORT_EMAIL } from "../../utils/supportEmail";
 
 
@@ -321,7 +321,7 @@ export default function Index() {
   const {
     createOrder,
     createWidgetSession,
-    closeApplePay,
+    closeGuestCheckout,
     options,
     isLoadingOptions,
     optionsError,
@@ -331,7 +331,9 @@ export default function Index() {
     currentQuote,
     isLoadingQuote,
     fetchQuote,
-    applePayVisible,
+    guestCheckoutVisible,
+    activePaymentMethod,
+    isSandboxOrder,
     hostedUrl,
     isProcessingPayment,
     setTransactionStatus,
@@ -532,13 +534,15 @@ export default function Index() {
       // Apple Pay: createOrder will validate email + phone and throw appropriate errors
       await createOrder(updatedFormData);
     } catch (error: any) {
-      // Handle missing email - show confirmation before linking
+      const isGooglePay = formData.paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
+      const paymentLabel = isGooglePay ? 'Google Pay' : 'Apple Pay';
+
       if (error.code === 'MISSING_EMAIL') {
         setPendingForm(updatedFormData);
         setApplePayAlert({
           visible: true,
-          title: 'Link Email for Apple Pay',
-          message: 'Apple Pay requires both email and phone verification for compliance.\n\nWould you like to link your email to this account to continue?',
+          title: `Link Email for ${paymentLabel}`,
+          message: `${paymentLabel} requires both email and phone verification for compliance.\n\nWould you like to link your email to this account to continue?`,
           type: 'info',
           navigationPath: '/email-verify?mode=link'
         });
@@ -556,11 +560,11 @@ export default function Index() {
         // If phone is linked to CDP but not verified/expired, use re-verify flow
         if (cdpPhone) {
           const isUSPhone = cdpPhone.startsWith('+1');
-          const disclaimer = isUSPhone ? '' : '\n\nNote: Apple Pay is only available for US phone numbers. You can use this flow to experience the verification process.';
+          const disclaimer = isUSPhone ? '' : `\n\nNote: ${paymentLabel} is only available for US phone numbers. You can use this flow to experience the verification process.`;
 
           setApplePayAlert({
             visible: true,
-            title: 'Re-verify Phone for Apple Pay',
+            title: `Re-verify Phone for ${paymentLabel}`,
             message: `Your phone is linked but needs verification.\n\nTo verify, we need to sign you out and send a verification code to your phone.\n\nWould you like to continue?${disclaimer}`,
             type: 'info',
             onConfirmCallback: async () => {
@@ -609,8 +613,8 @@ export default function Index() {
           // No phone linked at all - use link mode
           setApplePayAlert({
             visible: true,
-            title: 'Link Phone for Apple Pay',
-            message: 'Apple Pay requires both email and phone verification for compliance.\n\nWould you like to link your phone to this account to continue?',
+            title: `Link Phone for ${paymentLabel}`,
+            message: `${paymentLabel} requires both email and phone verification for compliance.\n\nWould you like to link your phone to this account to continue?`,
             type: 'info',
             navigationPath: '/phone-verify?mode=link'
           });
@@ -623,7 +627,7 @@ export default function Index() {
         setPendingForm(updatedFormData);
         const expiredPhone = getVerifiedPhone();
         const isUSPhone = expiredPhone?.startsWith('+1');
-        const disclaimer = isUSPhone ? '' : '\n\nNote: Apple Pay is only available for US phone numbers. You can use this flow to experience the verification process.';
+        const disclaimer = isUSPhone ? '' : `\n\nNote: ${paymentLabel} is only available for US phone numbers. You can use this flow to experience the verification process.`;
 
         setApplePayAlert({
           visible: true,
@@ -677,7 +681,7 @@ export default function Index() {
         setApplePayAlert({
           visible: true,
           title: 'US Phone Required',
-          message: 'Apple Pay Guest Checkout is only available for US phone numbers.\n\nYou can:\n• Switch to Coinbase Widget for international payments\n• Use Sandbox mode to test the Apple Pay flow\n• Link a US phone number to your account',
+          message: `${paymentLabel} Guest Checkout is only available for US phone numbers.\n\nYou can:\n• Switch to Coinbase Widget for international payments\n• Use Sandbox mode to test the ${paymentLabel} flow\n• Link a US phone number to your account`,
           type: 'info'
         });
         setIsProcessingPayment(false);
@@ -764,16 +768,14 @@ export default function Index() {
 
       
 
-      {applePayVisible && (
-        <ApplePayWidget
+      {guestCheckoutVisible && activePaymentMethod && (
+        <APIGuestCheckoutWidget
           paymentUrl={hostedUrl}
-          onClose={() => {
-            closeApplePay(); // Stop loading when closed
-          }}
+          paymentMethod={activePaymentMethod as 'GUEST_CHECKOUT_APPLE_PAY' | 'GUEST_CHECKOUT_GOOGLE_PAY'}
+          onClose={closeGuestCheckout}
           setIsProcessingPayment={setIsProcessingPayment}
-          isSandbox={getCurrentPartnerUserRef()?.startsWith('sandbox-') || false}
+          isSandbox={isSandboxOrder}
           onAlert={(title, message, type) => {
-            // Enhance alert message with transaction details
             let enhancedMessage = message;
             if (currentTransaction) {
               const txDetails = `\n\n${currentTransaction.amount} ${currentTransaction.paymentCurrency} → ${currentTransaction.asset} (${currentTransaction.network})`;
@@ -790,7 +792,7 @@ export default function Index() {
         message={alertMessage}
         onConfirm={() => setShowAlert(false)}
       />
-      {/* ApplePayWidget Alert */}
+      {/* Guest Checkout Alert */}
       <CoinbaseAlert
         visible={applePayAlert.visible}
         title={applePayAlert.title}

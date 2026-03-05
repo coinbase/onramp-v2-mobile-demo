@@ -1,7 +1,7 @@
-import express from 'express';
 import cors from 'cors';
-import { z } from 'zod';
+import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 
 import { generateJwt } from '@coinbase/cdp-sdk/auth';
 import { resolveClientIp } from './ip.js';
@@ -181,6 +181,9 @@ app.post("/server/api", async (req, res) => {
       method: method || 'POST',
       body: targetBody
     });
+    if (targetUrl.includes('/onramp/orders')) {
+      console.log('📌 [SERVER] Onramp order request — isQuote:', targetBody?.isQuote);
+    }
 
 
     // Generate JWT for Coinbase API calls (if needed)
@@ -221,6 +224,7 @@ app.post("/server/api", async (req, res) => {
       ...(additionalHeaders || {}) // Merge client-provided headers
     };
 
+    console.log('📌 [SERVER] Fetching final URL:', finalUrl);
     // Forward request with authentication
     const response = await fetch(finalUrl, {
       method: method || 'POST',
@@ -240,6 +244,11 @@ app.post("/server/api", async (req, res) => {
           statusText: response.statusText,
           data: data
         });
+        if (isOnrampRequest) {
+          console.log('🔑 [SERVER] Onramp response keys:', Object.keys(data));
+          console.log('🔗 [SERVER] paymentLink:', JSON.stringify(data.paymentLink ?? 'NOT IN RESPONSE'));
+          console.log('📋 [SERVER] Full onramp response:', JSON.stringify(data));
+        }
       } else {
         // Non-JSON response (likely error), get as text
         const textResponse = await response.text();
