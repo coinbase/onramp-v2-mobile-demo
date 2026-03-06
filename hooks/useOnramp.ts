@@ -25,7 +25,7 @@
  * │    ↓                                                             │
  * │ 5. USER SLIDES CONFIRM → createOrder() OR createWidgetSession() │
  * │    ↓                                                             │
- * │ 6. PAYMENT FLOW → ApplePayWidget OR Browser Redirect            │
+ * │ 6. PAYMENT FLOW → APIGuestCheckoutWidget OR Browser Redirect    │
  * └──────────────────────────────────────────────────────────────────┘
  *
  * TWO PAYMENT PATHS:
@@ -36,7 +36,7 @@
  *    - USD only
  *    - Hidden WebView handles v2 orders API
  *    - Real-time transaction tracking via post-events
- *    Flow: createOrder() → ApplePayWidget → Native sheet → Blockchain
+ *    Flow: createOrder() → APIGuestCheckoutWidget → Native sheet → Blockchain
  *
  * B. COINBASE WIDGET (COINBASE_WIDGET):
  *    - Browser-based checkout (Linking.openURL)
@@ -60,7 +60,7 @@
  * before sending to Coinbase API (needs lowercase network names, uppercase symbols).
  *
  * @see components/onramp/OnrampForm.tsx for form UI and validation
- * @see utils/createApplePayOrder.ts for Apple Pay API integration
+ * @see utils/createGuestCheckoutOrder.ts for guest checkout (Apple Pay / Google Pay) API integration
  * @see utils/createOnrampSession.ts for Widget session API
  * @see utils/fetchBuyQuote.ts for quote generation logic
  */
@@ -71,7 +71,7 @@ import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { useCallback, useMemo, useState } from "react";
 import { OnrampFormData } from "../components/onramp/OnrampForm";
 import { TEST_ACCOUNTS } from "../constants/TestAccounts";
-import { createApplePayOrder } from "../utils/createApplePayOrder";
+import { createGuestCheckoutOrder } from "../utils/createGuestCheckoutOrder";
 import { fetchBuyOptions } from "../utils/fetchBuyOptions";
 import { fetchBuyQuote } from "../utils/fetchBuyQuote";
 import { getCountry, getSandboxMode, getSubdivision, getVerifiedPhone, getVerifiedPhoneAt, isPhoneFresh60d, isTestSessionActive, setCurrentPartnerUserRef, setSubdivision } from "../utils/sharedState";
@@ -79,8 +79,8 @@ import { getCountry, getSandboxMode, getSubdivision, getVerifiedPhone, getVerifi
 
 export type PaymentMethodOption = { display: string; value: string };
 export function useOnramp() {
-  // These states from index.tsx:
-  const [applePayVisible, setApplePayVisible] = useState(false);
+  const [guestCheckoutVisible, setGuestCheckoutVisible] = useState(false);
+  const [activePaymentMethod, setActivePaymentMethod] = useState<string | null>(null);
   const [hostedUrl, setHostedUrl] = useState('');
   const [transactionStatus, setTransactionStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [options, setOptions] = useState<any>(null);
@@ -91,6 +91,7 @@ export function useOnramp() {
   const { currentUser } = useCurrentUser();
   const [buyConfig, setBuyConfig] = useState<any>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isSandboxOrder, setIsSandboxOrder] = useState(false);
 
 
   /**
@@ -131,20 +132,19 @@ export function useOnramp() {
       const isTestSession = isTestSessionActive();
       const currentSandboxMode = getSandboxMode();
 
-      console.log('🔍 [APPLE PAY] Sandbox detection:', {
-        isTestSession,
-        getSandboxMode: currentSandboxMode,
-        shouldUseSandbox: currentSandboxMode || isTestSession
-      });
+      const paymentMethodValue = formData.paymentMethod || 'GUEST_CHECKOUT_APPLE_PAY';
+      const paymentLabel = paymentMethodValue === 'GUEST_CHECKOUT_GOOGLE_PAY' ? 'Google Pay' : 'Apple Pay';
 
-      // Generate unique user reference for transaction tracking
-      // Apple Pay: Use userId with sandbox prefix for sandbox environment OR test accounts
-      const sandboxPrefix = (currentSandboxMode || isTestSession) ? "sandbox-" : "";
+      const sandboxPrefix = currentSandboxMode ? "sandbox-" : "";
       const userId = currentUser?.userId || 'unknown-user';
       const partnerUserRef = `${sandboxPrefix}${userId}`;
 
-      console.log('🔍 [APPLE PAY] partnerUserRef:', partnerUserRef);
+      console.log(`[${paymentLabel.toUpperCase()}] Creating order`, {
+        sandbox: currentSandboxMode,
+        partnerUserRef,
+      });
       setCurrentPartnerUserRef(partnerUserRef);
+      setIsSandboxOrder(currentSandboxMode);
 
       // IMPORTANT: Register push token before transaction (ensures webhook can send notification)
       try {
@@ -162,7 +162,7 @@ export function useOnramp() {
         // Don't block transaction if push token fails
       }
 
-      // Apple Pay Guest Checkout requires BOTH email and phone
+      // Guest Checkout (Apple Pay / Google Pay) requires BOTH email and phone
       // For test sessions, use test account credentials
       const userEmail = isTestSession
         ? TEST_ACCOUNTS.email
@@ -182,41 +182,40 @@ export function useOnramp() {
 
         // Check if email is missing or not linked
         if (!userEmail) {
-          const missingEmailError: any = new Error('Email verification required for Apple Pay');
+          const missingEmailError: any = new Error(`Email verification required for ${paymentLabel}`);
           missingEmailError.code = 'MISSING_EMAIL';
           throw missingEmailError;
         }
 
         // Check if phone is missing or not linked to CDP
         if (!cdpPhone) {
-          const missingPhoneError: any = new Error('Phone verification required for Apple Pay');
+          const missingPhoneError: any = new Error(`Phone verification required for ${paymentLabel}`);
           missingPhoneError.code = 'MISSING_PHONE';
           throw missingPhoneError;
         }
 
         // Check if CDP phone matches verified phone AND is fresh (60 days)
         if (phone !== cdpPhone || !isPhoneFresh60d()) {
-          console.log('🚫 [APPLE PAY] Phone verification failed:', {
+          console.log(`🚫 [${paymentLabel.toUpperCase()}] Phone verification failed:`, {
             phoneMatch: phone === cdpPhone,
             isFresh: isPhoneFresh60d()
           });
-          const missingPhoneError: any = new Error('Phone verification required for Apple Pay. Please verify your phone on the Profile page.');
+          const missingPhoneError: any = new Error(`Phone verification required for ${paymentLabel}. Please verify your phone on the Profile page.`);
           missingPhoneError.code = 'MISSING_PHONE';
           throw missingPhoneError;
         }
       } else {
-        console.log('🧪 [APPLE PAY] Sandbox mode - skipping phone validation');
+        console.log(`🧪 [${paymentLabel.toUpperCase()}] Sandbox mode - skipping phone validation`);
 
-        // CRITICAL: Apple Pay is US-only, so always use TEST_ACCOUNTS US phone in sandbox
-        // This allows international users to test Apple Pay flow
+        // Guest Checkout is US-only, so always use TEST_ACCOUNTS US phone in sandbox
         phone = TEST_ACCOUNTS.phone; // US phone: +12345678901
         phoneAt = Date.now();
-        console.log('🧪 [APPLE PAY] Using TEST_ACCOUNTS US phone for sandbox:', phone);
+        console.log(`🧪 [${paymentLabel.toUpperCase()}] Using TEST_ACCOUNTS US phone for sandbox:`, phone);
       }
 
       // Production: require fresh phone verification
       if (!getSandboxMode() && (!phone || !isPhoneFresh60d())) {
-        const phoneExpiredError: any = new Error('Phone verification has expired. Please re-verify your phone to continue with Apple Pay.');
+        const phoneExpiredError: any = new Error(`Phone verification has expired. Please re-verify your phone to continue with ${paymentLabel}.`);
         phoneExpiredError.code = 'PHONE_EXPIRED';
         throw phoneExpiredError;
       }
@@ -245,14 +244,14 @@ export function useOnramp() {
 
       // Map form values to API format (display names → API values)
       // Order creation: API call to Coinbase (auth handled by authenticatedFetch)
-      const result = await createApplePayOrder({
+      const result = await createGuestCheckoutOrder({
         paymentAmount: formData.amount,
         paymentCurrency: formData.paymentCurrency,
         purchaseCurrency: getAssetSymbolFromName(formData.asset),
-        paymentMethod: "GUEST_CHECKOUT_APPLE_PAY",
+        paymentMethod: paymentMethodValue,
         destinationNetwork: networkName,
         destinationAddress: destinationAddress,
-        email: userEmail || 'noemail@test.com', // Fallback (should never happen due to validation above)
+        email: userEmail || 'noemail@test.com',
         phoneNumber: phone,
         phoneNumberVerifiedAt: new Date(phoneAt!).toISOString(),
         partnerUserRef: partnerUserRef,
@@ -264,7 +263,8 @@ export function useOnramp() {
       // Extract hosted URL and show WebView
       if (result.hostedUrl) {
         setHostedUrl(result.hostedUrl);
-        setApplePayVisible(true);
+        setActivePaymentMethod(paymentMethodValue);
+        setGuestCheckoutVisible(true);
       } else {
         throw new Error('No payment URL received');
       }
@@ -389,11 +389,13 @@ export function useOnramp() {
     }
   }, [getAssetSymbolFromName, getNetworkNameFromDisplayName, setIsProcessingPayment]);
 
-  const closeApplePay = useCallback(() => {
-    setApplePayVisible(false);
+  const closeGuestCheckout = useCallback(() => {
+    setGuestCheckoutVisible(false);
+    setActivePaymentMethod(null);
     setHostedUrl('');
     setIsProcessingPayment(false);
     setTransactionStatus(null);
+    setIsSandboxOrder(false);
   }, []);
 
   /**
@@ -530,7 +532,9 @@ export function useOnramp() {
 
   return {
     // State
-    applePayVisible,
+    guestCheckoutVisible,
+    activePaymentMethod,
+    isSandboxOrder,
     hostedUrl,
     isProcessingPayment,
     transactionStatus,
@@ -544,7 +548,7 @@ export function useOnramp() {
     // Actions
     createOrder,
     createWidgetSession,
-    closeApplePay,
+    closeGuestCheckout,
     fetchOptions,
     getAvailableNetworks,
     getAvailableAssets,

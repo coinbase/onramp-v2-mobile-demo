@@ -9,9 +9,10 @@ import { authenticatedFetch } from "./authenticatedFetch";
  * 4. Test mode: Server automatically applies sandbox mode for TestFlight tokens
  */
 
-export async function createApplePayOrder(payload: any) {
+export async function createGuestCheckoutOrder(payload: any) {
   try {
-    console.log('📤 [API] createApplePayOrder');
+    const method = payload.paymentMethod?.includes('GOOGLE') ? 'Google Pay' : 'Apple Pay';
+    console.log(`📤 [API] createGuestCheckoutOrder (${method})`);
 
     const response = await authenticatedFetch(`${BASE_URL}/server/api`, {
       method: "POST",
@@ -63,6 +64,7 @@ export async function createApplePayOrder(payload: any) {
     console.log('✅ [RESPONSE] Request succeeded!');
 
     const responseJson = await response.json();
+    console.log('responseJson', responseJson);
 
     // Return the hosted URL from Coinbase response
     return {
@@ -74,3 +76,4 @@ export async function createApplePayOrder(payload: any) {
     throw error;
   }
 }
+

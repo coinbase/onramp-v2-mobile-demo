@@ -166,6 +166,8 @@ export function OnrampForm({
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslate = useRef(new Animated.Value(300)).current;
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
+  const isGooglePay = paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
+  const isGuestCheckout = isApplePay || isGooglePay;
 
   // User limits state
   const [userLimits, setUserLimits] = useState<{ weekly: UserLimit; lifetime: UserLimit } | null>(null);
@@ -204,14 +206,13 @@ const usSubs = useMemo(() => {
 
   const displayCurrencies = React.useMemo(() => {
     const list = Array.isArray(paymentCurrencies) && paymentCurrencies.length ? paymentCurrencies : ['USD'];
-    return isApplePay ? ['USD'] : list;
-  }, [isApplePay, paymentCurrencies]);
+    return isGuestCheckout ? ['USD'] : list;
+  }, [isGuestCheckout, paymentCurrencies]);
 
   useEffect(() => {
-    // if Apple Pay selected, force USD
-    if (isApplePay && paymentCurrency !== 'USD')
+    if (isGuestCheckout && paymentCurrency !== 'USD')
       setPaymentCurrency('USD');
-  }, [isApplePay, paymentCurrency]);
+  }, [isGuestCheckout, paymentCurrency]);
 
   // Track network changes in shared state
   useEffect(() => {
@@ -274,7 +275,7 @@ const usSubs = useMemo(() => {
 
   // User limits validation (Apple Pay + production mode)
   const limitsValidation = useMemo(() => {
-    if (!userLimits || localSandboxEnabled || !isApplePay) {
+    if (!userLimits || localSandboxEnabled || !isGuestCheckout) {
       return { isValid: true, error: null, warning: null };
     }
 
@@ -338,7 +339,11 @@ const usSubs = useMemo(() => {
   const methods = useMemo(() => {
     const arr = [{ display: 'Coinbase Widget', value: 'COINBASE_WIDGET' }];
     if (country === 'US' && paymentCurrency === 'USD') {
-      arr.push({ display: 'Apple Pay API', value: 'GUEST_CHECKOUT_APPLE_PAY' });
+      if (Platform.OS === 'android') {
+        arr.push({ display: 'Google Pay API', value: 'GUEST_CHECKOUT_GOOGLE_PAY' });
+      } else if (Platform.OS === 'ios') {
+        arr.push({ display: 'Apple Pay API', value: 'GUEST_CHECKOUT_APPLE_PAY' });
+      }
     }
     return arr;
   }, [country, paymentCurrency]);
@@ -522,13 +527,13 @@ const usSubs = useMemo(() => {
     const currency = options.payment_currencies.find((c: any) => c.id === paymentCurrency);
     if (!currency?.limits) return null;
     
-    if (paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY') {
+    if (paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY' || paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY') {
       return {
         min: 2,
         max: 1000,
         currency: paymentCurrency,
         display: `$2 - $1000 ${paymentCurrency}`,
-        quotePaymentMethod: 'GUEST_CHECKOUT_APPLE_PAY'
+        quotePaymentMethod: paymentMethod
       };
     } else if (paymentMethod === 'COINBASE_WIDGET') {
       const allLimits = currency.limits || [];
@@ -584,8 +589,7 @@ const usSubs = useMemo(() => {
     const verifiedPhone = getVerifiedPhone();
     const isPhoneFresh = isPhoneFresh60d();
 
-    // Only fetch if: Apple Pay + production mode + phone verified
-    if (!isApplePay || localSandboxEnabled || !verifiedPhone || !isPhoneFresh) {
+    if (!isGuestCheckout || localSandboxEnabled || !verifiedPhone || !isPhoneFresh) {
       setUserLimits(null);
       return;
     }
@@ -693,7 +697,7 @@ const usSubs = useMemo(() => {
       address,
       paymentMethod,
       paymentCurrency,
-      sandbox: localSandboxEnabled, // Single source of truth
+      sandbox: localSandboxEnabled,
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
     });
   }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp]);
@@ -727,6 +731,12 @@ const usSubs = useMemo(() => {
         <Text style={styles.helper}>
           {localSandboxEnabled ? 'Test without real transactions' : 'Real transactions will be executed'}
         </Text>
+
+        {localSandboxEnabled && isGuestCheckout && (
+          <Text style={[styles.helper, { marginTop: 4 }]}>
+            sandbox- prefix + auto-confirm modal
+          </Text>
+        )}
       </View>
 
       {/* Buy Card */}
@@ -756,7 +766,7 @@ const usSubs = useMemo(() => {
             <View>
               {limits && (
                 <Text style={styles.limitsText}>
-                  {isApplePay ? 'Apple Pay limit: ' : 'Payment method limit: '}{limits.display}
+                  {isApplePay ? 'Apple Pay limit: ' : isGooglePay ? 'Google Pay limit: ' : 'Payment method limit: '}{limits.display}
                 </Text>
               )}
               {userLimits && !localSandboxEnabled && (

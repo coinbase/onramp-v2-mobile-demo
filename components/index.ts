@@ -5,27 +5,25 @@
  */
 
 // UI Components
-export { SwipeToConfirm } from './ui/SwipeToConfirm';
+export { FailedTransactionBadge, FailedTransactionCard } from './ui/FailedTransactionCard';
 export { SupportEmailButton } from './ui/SupportEmailButton';
-export { FailedTransactionCard, FailedTransactionBadge } from './ui/FailedTransactionCard';
+export { SwipeToConfirm } from './ui/SwipeToConfirm';
 
 
 // Onramp Components
-export { ApplePayWidget } from './onramp/ApplePayWidget';
+export { APIGuestCheckoutWidget } from './onramp/APIGuestCheckoutWidget';
 export { OnrampForm } from './onramp/OnrampForm';
 
 // Hooks
 export { useOnramp } from '../hooks/useOnramp';
 
 // Utils
-export { createApplePayOrder } from '../utils/createApplePayOrder';
+export { createGuestCheckoutOrder } from '../utils/createGuestCheckoutOrder';
 export { fetchBuyOptions } from '../utils/fetchBuyOptions';
 export { fetchTransactionHistory } from '../utils/fetchTransactionHistory';
 export {
-  openSupportEmail,
   createDebugInfoFromTransaction,
-  createGuestCheckoutDebugInfo,
-  SUPPORT_EMAIL
+  createGuestCheckoutDebugInfo, openSupportEmail, SUPPORT_EMAIL
 } from '../utils/supportEmail';
 
 // Types

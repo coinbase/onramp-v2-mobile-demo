@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { ExpoConfig } from 'expo/config';
+ 
+const withGooglePayWebView = require('./plugins/withGooglePayWebView');
 
 const config: ExpoConfig = {
     name: 'Onramp V2 Demo',
@@ -43,7 +45,8 @@ const config: ExpoConfig = {
       ['expo-notifications', {
         icon: './assets/images/icon.png',
         color: '#0052FF'
-      }]
+      }],
+      withGooglePayWebView,
     ],
 
     experiments: { typedRoutes: true },
