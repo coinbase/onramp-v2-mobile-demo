@@ -27,7 +27,7 @@ const config: ExpoConfig = {
         backgroundColor: '#ffffff'
       },
       edgeToEdgeEnabled: true,
-      package: "com.coinbase.cdp-onramp"
+      package: "com.coinbase.cdp_onramp"
     },
 
     web: {
