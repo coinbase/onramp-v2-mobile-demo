@@ -90,6 +90,57 @@ export function APIGuestCheckoutWidget({
         style.textContent = \`${config.hideCSS}\`;
         document.head.appendChild(style);
 
+        // Log Google Pay gateway merchant ID from the page
+        try {
+          // Check for NEXT_PUBLIC env vars exposed on window.__NEXT_DATA__ or window.__ENV__
+          var nextData = window.__NEXT_DATA__;
+          if (nextData && nextData.runtimeConfig) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              eventName: 'debug.next_config',
+              data: nextData.runtimeConfig
+            }));
+          }
+          if (nextData && nextData.props && nextData.props.pageProps) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              eventName: 'debug.page_props',
+              data: nextData.props.pageProps
+            }));
+          }
+
+          // Intercept Google Pay loadPaymentData to capture the full request
+          if (window.google && window.google.payments && window.google.payments.api) {
+            var OrigClient = window.google.payments.api.PaymentsClient;
+            var origProto = OrigClient.prototype.loadPaymentData;
+            OrigClient.prototype.loadPaymentData = function(req) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                eventName: 'debug.gpay_payment_request',
+                data: JSON.parse(JSON.stringify(req))
+              }));
+              return origProto.apply(this, arguments);
+            };
+          }
+
+          // Also scan script tags and meta tags for merchant IDs
+          var scripts = document.querySelectorAll('script');
+          scripts.forEach(function(s) {
+            var text = s.textContent || '';
+            if (text.includes('gatewayMerchantId') || text.includes('CHECKOUT_COM') || text.includes('checkout.com')) {
+              var match = text.match(/gatewayMerchantId['":\\s]+['"]([^'"]+)['"]/);
+              if (match) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                  eventName: 'debug.gateway_merchant_id',
+                  data: { gatewayMerchantId: match[1], source: 'script_tag' }
+                }));
+              }
+            }
+          });
+        } catch(e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            eventName: 'debug.extraction_error',
+            data: { error: e.message }
+          }));
+        }
+
         function tryClick(attempt) {
           var btn = document.getElementById('${config.buttonId}');
           if (btn) {
@@ -132,7 +183,12 @@ export function APIGuestCheckoutWidget({
         try {
           const data = JSON.parse(nativeEvent.data);
           const { eventName } = data;
-          console.log(`[${config.label}] ${eventName}`, data.data ?? '');
+          console.log(`[${config.label}] ${eventName}`, JSON.stringify(data.data ?? '', null, 2));
+
+          if (eventName?.startsWith('debug.')) {
+            console.log(`🔍 [DEBUG] ${eventName}:`, JSON.stringify(data.data, null, 2));
+            return;
+          }
 
           switch (eventName) {
             case "onramp_api.load_pending":

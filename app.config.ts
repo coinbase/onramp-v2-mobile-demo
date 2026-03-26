@@ -6,7 +6,7 @@ const withGooglePayWebView = require('./plugins/withGooglePayWebView');
 const config: ExpoConfig = {
     name: 'Onramp V2 Demo',
     slug: 'onramp-v2-demo',
-    version: '1.1.0',
+    version: '1.2.0',
     scheme: 'onrampdemo',
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
