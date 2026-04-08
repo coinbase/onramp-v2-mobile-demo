@@ -18,6 +18,7 @@ Install Testflight and try the mobile app using this [invite link](https://testf
 - 🧪 **Sandbox Mode**: Test without real transactions
 - 📊 **User Limits API**: Real-time weekly spending & lifetime transaction limits for Apple Pay
 - 🆘 **Failed Transaction Support**: Email support flow for failed transactions
+- 💱 **Crypto Cash Out (Offramp)**: Sell crypto back to fiat via a Coinbase-hosted flow, with on-chain transfer executed directly from the embedded wallet
 
 ### Video Demo
 #### Headless Apple Pay Seamless Onramp Transaction Flow
@@ -217,6 +218,22 @@ Test without real transactions:
    - Email verification still required for server authentication
 
 > **Note**: Sandbox mode auto-resets on app restart for safety.
+
+### Cashing Out (Offramp)
+
+Convert crypto in your mainnet wallet back to fiat:
+
+1. Go to **Profile Tab** → scroll to your mainnet balances
+2. Tap **Cash Out (Offramp)** on any balance row (Base, Ethereum, or Solana)
+3. Complete the Coinbase-hosted sell flow in the browser — select amount, payment method, and confirm
+4. After tapping "Cash out now", the app reopens automatically
+5. Review the locked amount and destination address (set by Coinbase)
+6. Tap **Send Now** to execute the on-chain transfer from your embedded wallet to Coinbase
+
+> **Note**: You have 30 minutes to complete the on-chain send after confirming in the Coinbase widget. Offramp is mainnet-only and requires a real wallet balance.
+
+#### Offramp Cash Out Demo
+https://github.com/user-attachments/assets/445e487d-50f6-443b-8072-e4e178668ac7
 
 ## Project Structure
 

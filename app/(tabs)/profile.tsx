@@ -106,7 +106,9 @@ import { BASE_URL } from "../../constants/BASE_URL";
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { debugSecureStoreSession } from "../../utils/debugSession";
-import { clearManualAddress, clearTestSession, daysUntilExpiry, forceUnverifyPhone, formatPhoneDisplay, getLifetimeTransactionThreshold, getManualWalletAddress, getSandboxMode, getTestWalletSol, getVerifiedPhone, getVerifiedPhoneUserId, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentSolanaAddress, setCurrentWalletAddress, setLifetimeTransactionThreshold, setManualWalletAddress, setSandboxMode, setSubdivision, setVerifiedPhone } from "../../utils/sharedState";
+import { clearManualAddress, clearTestSession, daysUntilExpiry, forceUnverifyPhone, formatPhoneDisplay, getLifetimeTransactionThreshold, getManualWalletAddress, getSandboxMode, getTestWalletSol, getVerifiedPhone, getVerifiedPhoneUserId, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentSolanaAddress, setCurrentWalletAddress, setLifetimeTransactionThreshold, setManualWalletAddress, setSandboxMode, setSubdivision, setVerifiedPhone, setPendingOfframpBalance } from "../../utils/sharedState";
+import { createOfframpSession } from "../../utils/createOfframpSession";
+import * as WebBrowser from 'expo-web-browser';
 
 const { CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BLUE, BORDER, WHITE, VIOLET, ORANGE } = COLORS;
 
@@ -1167,37 +1169,109 @@ export default function WalletScreen() {
                                       ) : (
                                         <Text style={styles.tokenUsd}>Price N/A</Text>
                                       )}
-                                      <Pressable
-                                        style={[
-                                          styles.button,
-                                          { marginTop: 8, paddingVertical: 6, paddingHorizontal: 12 },
-                                          isExpoGo && styles.buttonDisabled
-                                        ]}
-                                        onPress={() => {
-                                          if (isExpoGo) {
-                                            setAlertState({
-                                              visible: true,
-                                              title: "Transfer not available",
-                                              message: "Crypto transfers are not available in Expo Go due to missing crypto.subtle package. Please use TestFlight or a development build.",
-                                              type: "info",
-                                            });
-                                            return;
-                                          }
-                                          // Navigate to transfer page with token data
-                                          router.push({
-                                            pathname: '/transfer',
-                                            params: {
-                                              token: JSON.stringify(balance),
-                                              network: network.toLowerCase()
+                                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                                        <Pressable
+                                          style={[
+                                            styles.button,
+                                            { paddingVertical: 6, paddingHorizontal: 12 },
+                                            isExpoGo && styles.buttonDisabled
+                                          ]}
+                                          onPress={() => {
+                                            if (isExpoGo) {
+                                              setAlertState({
+                                                visible: true,
+                                                title: "Transfer not available",
+                                                message: "Crypto transfers are not available in Expo Go due to missing crypto.subtle package. Please use TestFlight or a development build.",
+                                                type: "info",
+                                              });
+                                              return;
                                             }
-                                          });
-                                        }}
-                                        disabled={isExpoGo}
-                                      >
-                                        <Text style={[styles.buttonText, { fontSize: 12 }]}>
-                                          {isExpoGo ? "Transfer unavailable (Expo Go)" : "Transfer"}
-                                        </Text>
-                                      </Pressable>
+                                            router.push({
+                                              pathname: '/transfer',
+                                              params: {
+                                                token: JSON.stringify(balance),
+                                                network: network.toLowerCase()
+                                              }
+                                            });
+                                          }}
+                                          disabled={isExpoGo}
+                                        >
+                                          <Text style={[styles.buttonText, { fontSize: 12 }]}>
+                                            {isExpoGo ? "Transfer (Expo Go)" : "Transfer"}
+                                          </Text>
+                                        </Pressable>
+                                        <Pressable
+                                          style={[
+                                            styles.button,
+                                            { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#1a472a' },
+                                            isExpoGo && styles.buttonDisabled
+                                          ]}
+                                          onPress={async () => {
+                                            if (isExpoGo) {
+                                              setAlertState({
+                                                visible: true,
+                                                title: "Cash Out not available",
+                                                message: "Offramp is not available in Expo Go. Please use TestFlight or a development build.",
+                                                type: "info",
+                                              });
+                                              return;
+                                            }
+                                            try {
+                                              const userId = currentUser?.userId;
+                                              if (!userId) throw new Error('User not signed in');
+
+                                              // EVM balances use the smart account; Solana uses the solana address
+                                              const isSolanaNetwork = network.toLowerCase() === 'solana';
+                                              const address = isSolanaNetwork
+                                                ? solanaAddress
+                                                : primaryAddress;
+
+                                              if (!address) throw new Error('No wallet address found');
+
+                                              // Store balance so offramp-send can access decimals/contract info
+                                              setPendingOfframpBalance(balance);
+
+                                              const url = await createOfframpSession({
+                                                address,
+                                                network,
+                                                asset: symbol,
+                                                userId,
+                                              });
+
+                                              // openAuthSessionAsync uses SFSafariViewController on iOS,
+                                              // which intercepts the onrampdemo:// redirect internally
+                                              // without showing the "Open in app?" dialog that breaks
+                                              // the Coinbase sell flow when using Linking.openURL.
+                                              const result = await WebBrowser.openAuthSessionAsync(
+                                                url,
+                                                'onrampdemo://'
+                                              );
+
+                                              if (result.type === 'success' && result.url) {
+                                                // Extract partnerUserRef from the redirect URL
+                                                const redirected = new URL(result.url);
+                                                const ref = redirected.searchParams.get('partnerUserRef') || userId;
+                                                router.push({
+                                                  pathname: '/offramp-send',
+                                                  params: { partnerUserRef: ref },
+                                                });
+                                              }
+                                            } catch (err: any) {
+                                              setAlertState({
+                                                visible: true,
+                                                title: "Cash Out Failed",
+                                                message: err.message || "Failed to start offramp session.",
+                                                type: "error",
+                                              });
+                                            }
+                                          }}
+                                          disabled={isExpoGo}
+                                        >
+                                          <Text style={[styles.buttonText, { fontSize: 12, color: '#4ADE80' }]}>
+                                            {isExpoGo ? "Cash Out (Expo Go)" : "Cash Out (Offramp)"}
+                                          </Text>
+                                        </Pressable>
+                                      </View>
                                     </View>
                                   </View>
                                 );

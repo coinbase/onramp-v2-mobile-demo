@@ -116,6 +116,13 @@ export const setPendingForm = (form: any) => { pendingTransactionForm = form; };
 export const getPendingForm = () => pendingTransactionForm;
 export const clearPendingForm = () => { pendingTransactionForm = null; };
 
+// Balance object stored when user initiates offramp — read in offramp-send screen
+// to access token decimals, contract address, and mint address without re-fetching balances.
+let pendingOfframpBalance: any = null;
+
+export const setPendingOfframpBalance = (balance: any) => { pendingOfframpBalance = balance; };
+export const getPendingOfframpBalance = () => pendingOfframpBalance;
+
 export const getCountry = () => currentCountry;
 export const setCountry = (c: string) => { currentCountry = c; };
 

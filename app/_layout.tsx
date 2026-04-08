@@ -83,6 +83,15 @@ export default function RootLayout() {
                 }}
             />
 
+            {/* Offramp send — reached via deep link after Coinbase sell flow */}
+            <Stack.Screen
+              name="offramp-send"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_bottom',
+              }}
+            />
+
             {/* Main app with tabs */}
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           </Stack>
