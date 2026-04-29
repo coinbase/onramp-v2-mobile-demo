@@ -1161,7 +1161,7 @@ app.get('/events/onramp', async (req, res) => {
     } else {
       events = eventLogStore.get(userId) || eventLogStore.get(`sandbox-${userId}`) || [];
     }
-    console.log(`📋 [EVENTS] Returning ${events.length} events for user:`, userId);
+    console.log('📋 [EVENTS] Returning %d events for user: %s', events.length, userId);
     res.json({ events });
   } catch (error) {
     console.error('❌ [EVENTS] Error fetching events:', error);
