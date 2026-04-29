@@ -399,7 +399,7 @@ export default function Index() {
                 if (result.type === 'success' && result.url) {
                   const redirected = new URL(result.url);
                   const ref = redirected.searchParams.get('partnerUserRef');
-                  router.push({ pathname: '/onramp-return', params: ref ? { partnerUserRef: ref } : {} });
+                  router.push({ pathname: '/onramp-return' as any, params: ref ? { partnerUserRef: ref } : {} });
                 }
               }
             })();
@@ -553,7 +553,7 @@ export default function Index() {
           if (result.type === 'success' && result.url) {
             const redirected = new URL(result.url);
             const ref = redirected.searchParams.get('partnerUserRef');
-            router.push({ pathname: '/onramp-return', params: ref ? { partnerUserRef: ref } : {} });
+            router.push({ pathname: '/onramp-return' as any, params: ref ? { partnerUserRef: ref } : {} });
           }
         }
         return; // do not call createOrder()

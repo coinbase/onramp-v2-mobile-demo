@@ -464,7 +464,7 @@ export function useOnramp() {
         paymentCurrency: formData.paymentCurrency,
         purchaseCurrency: assetSymbol,
         destinationNetwork: networkName,
-        paymentMethod: formData.paymentMethod || 'COINBASE_WIDGET'
+        paymentMethod: formData.paymentMethod || 'COINBASE_WIDGET',
       });
 
       setCurrentQuote(quote);

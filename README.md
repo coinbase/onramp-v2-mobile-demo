@@ -236,6 +236,11 @@ Convert crypto in your mainnet wallet back to fiat:
 #### Offramp Cash Out Demo
 https://github.com/user-attachments/assets/445e487d-50f6-443b-8072-e4e178668ac7
 
+#### Coinbase Widget — In-App Browser with Deep Link Redirect
+https://github.com/user-attachments/assets/388d92a8-151f-488e-b104-da9364cfed1b
+
+![Coinbase Widget in-app browser showing pay.coinbase.com](https://github.com/user-attachments/assets/7fa36483-2a69-4d0f-b495-b9f250b40601)
+
 ## Project Structure
 
 ```
