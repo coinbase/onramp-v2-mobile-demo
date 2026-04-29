@@ -211,6 +211,7 @@ ipconfig getifaddr en0
 https://github.com/user-attachments/assets/388d92a8-151f-488e-b104-da9364cfed1b
 
 <img src="https://github.com/user-attachments/assets/7fa36483-2a69-4d0f-b495-b9f250b40601" width="300" />
+
 3. **Complete Purchase**
 4. **Receive Notification**: Transaction status notification on Production
 
