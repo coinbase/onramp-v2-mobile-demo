@@ -93,6 +93,7 @@
 import { useCurrentUser, useEvmAddress, useIsSignedIn, useSignOut, useSolanaAddress } from "@coinbase/cdp-hooks";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
+import * as WebBrowser from 'expo-web-browser';
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { APIGuestCheckoutWidget, OnrampForm, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
@@ -391,8 +392,15 @@ export default function Index() {
             (async () => {
               const url = await createWidgetSession(pendingForm);
               if (url) {
-                Linking.openURL(url);
                 setPendingForm(null);
+                // See main widget path below for explanation of why openAuthSessionAsync
+                // is required over WebView or Linking.openURL.
+                const result = await WebBrowser.openAuthSessionAsync(url, 'onrampdemo://');
+                if (result.type === 'success' && result.url) {
+                  const redirected = new URL(result.url);
+                  const ref = redirected.searchParams.get('partnerUserRef');
+                  router.push({ pathname: '/onramp-return' as any, params: ref ? { partnerUserRef: ref } : {} });
+                }
               }
             })();
             return;
@@ -527,7 +535,27 @@ export default function Index() {
       // Coinbase Widget: skip phone/email verification
       if ((formData.paymentMethod || '').toUpperCase() === 'COINBASE_WIDGET') {
         const url = await createWidgetSession(updatedFormData);
-        if (url) Linking.openURL(url);
+        if (url) {
+          // IMPORTANT: Must use openAuthSessionAsync (ASWebAuthenticationSession on iOS,
+          // Chrome Custom Tabs on Android) — NOT WebView/WKWebView and NOT Linking.openURL.
+          //
+          // Reasons:
+          // 1. WebView/WKWebView breaks Coinbase auth — no WebAuthn/Passkey support and
+          //    isolated cookie store means users must log in every time.
+          // 2. Linking.openURL opens full Safari with no way to programmatically intercept
+          //    the redirectUrl deep link back into the app.
+          // 3. openAuthSessionAsync shares the Safari cookie store (auto-login for users
+          //    already signed into Coinbase) and intercepts the onrampdemo:// callback
+          //    scheme automatically, closing the browser and returning the redirect URL.
+          //
+          // See: https://docs.cdp.coinbase.com — "How should I open the Coinbase Onramp URL?"
+          const result = await WebBrowser.openAuthSessionAsync(url, 'onrampdemo://');
+          if (result.type === 'success' && result.url) {
+            const redirected = new URL(result.url);
+            const ref = redirected.searchParams.get('partnerUserRef');
+            router.push({ pathname: '/onramp-return' as any, params: ref ? { partnerUserRef: ref } : {} });
+          }
+        }
         return; // do not call createOrder()
       }
 

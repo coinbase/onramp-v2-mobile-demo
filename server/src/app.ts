@@ -631,6 +631,39 @@ app.get('/balances/solana', async (req, res) => {
 // In-memory storage for local development
 const pushTokenStore = new Map<string, { token: string; platform: string; tokenType?: string; updatedAt: number }>();
 
+// In-memory webhook event log (keyed by partnerUserRef, capped at 50 events per user)
+type WebhookEvent = {
+  eventType: string;
+  transactionId: string | null;
+  timestamp: string;
+  amount?: string;
+  currency?: string;
+  network?: string;
+  failureReason?: string;
+};
+const MAX_EVENTS_PER_USER = 3;
+const eventLogStore = new Map<string, WebhookEvent[]>();
+
+async function storeWebhookEvent(partnerUserRef: string, event: WebhookEvent) {
+  const sandboxKey = partnerUserRef.startsWith('sandbox-') ? partnerUserRef : `sandbox-${partnerUserRef}`;
+
+  if (useDatabase && database) {
+    // Redis: fetch existing, prepend new event, trim to cap, store for both keys
+    const raw = await database.get(`webhookevents:${partnerUserRef}`);
+    const existing: WebhookEvent[] = raw ? JSON.parse(raw) : [];
+    const updated = [event, ...existing].slice(0, MAX_EVENTS_PER_USER);
+    const serialized = JSON.stringify(updated);
+    await database.set(`webhookevents:${partnerUserRef}`, serialized);
+    await database.set(`webhookevents:${sandboxKey}`, serialized);
+  } else {
+    // In-memory fallback for local dev
+    const existing = eventLogStore.get(partnerUserRef) || [];
+    const updated = [event, ...existing].slice(0, MAX_EVENTS_PER_USER);
+    eventLogStore.set(partnerUserRef, updated);
+    eventLogStore.set(sandboxKey, updated);
+  }
+}
+
 /**
  * Debug endpoint: Log when push token registration is attempted
  * No auth required - just for debugging TestFlight
@@ -1079,6 +1112,24 @@ app.post('/webhooks/onramp', webhookRateLimiter, async (req, res) => {
         console.log('ℹ️ [WEBHOOK] Unknown event type:', event);
     }
 
+    // Store event in the in-memory log so the app can fetch and display it
+    const eventPartnerUserRef = webhookData.partnerUserRef || webhookData.failedPartnerUserRef;
+    if (eventPartnerUserRef) {
+      const eventAmount = typeof webhookData.purchaseAmount === 'object'
+        ? webhookData.purchaseAmount?.value
+        : (webhookData.purchaseAmount || webhookData.paymentAmount);
+      await storeWebhookEvent(eventPartnerUserRef, {
+        eventType,
+        transactionId: txId || null,
+        timestamp: new Date().toISOString(),
+        amount: eventAmount,
+        currency: webhookData.purchaseCurrency || webhookData.paymentCurrency,
+        network: webhookData.destinationNetwork || webhookData.purchaseNetwork,
+        failureReason: webhookData.failureReason,
+      });
+      console.log('📋 [WEBHOOK] Event stored for user:', eventPartnerUserRef);
+    }
+
     // Always return 200 to acknowledge receipt
     // Coinbase will retry if we don't respond with 2xx
     res.status(200).json({ received: true });
@@ -1087,6 +1138,34 @@ app.post('/webhooks/onramp', webhookRateLimiter, async (req, res) => {
     console.error('❌ [WEBHOOK] Error processing webhook:', error);
     // Still return 200 to prevent retries on parsing errors
     res.status(200).json({ received: true, error: 'Processing error' });
+  }
+});
+
+/**
+ * GET /events/onramp
+ *
+ * Returns the recent webhook events received for the authenticated user.
+ * Used by the History tab to display a live event log (created, updated, success, failed).
+ * Events are stored in-memory on the server when Coinbase POSTs to /webhooks/onramp.
+ */
+app.get('/events/onramp', async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    let events: WebhookEvent[] = [];
+    if (useDatabase && database) {
+      const raw = await database.get(`webhookevents:${userId}`) || await database.get(`webhookevents:sandbox-${userId}`);
+      events = raw ? JSON.parse(raw) : [];
+    } else {
+      events = eventLogStore.get(userId) || eventLogStore.get(`sandbox-${userId}`) || [];
+    }
+    console.log('📋 [EVENTS] Returning %d events for user: %s', events.length, userId);
+    res.json({ events });
+  } catch (error) {
+    console.error('❌ [EVENTS] Error fetching events:', error);
+    res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
 

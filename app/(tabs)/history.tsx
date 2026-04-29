@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View
@@ -15,6 +16,8 @@ import { FailedTransactionBadge } from "../../components/ui/FailedTransactionCar
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { fetchTransactionHistory } from "../../utils/fetchTransactionHistory";
+import { fetchOnrampEvents, type OnrampEvent } from "../../utils/fetchOnrampEvents";
+import { getWebViewEvents, type WebViewEvent } from "../../utils/sharedState";
 import { useCurrentUser, useGetAccessToken } from "@coinbase/cdp-hooks";
 
 
@@ -48,6 +51,11 @@ export default function History() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [currentUserRef, setCurrentUserRef] = useState<string | null>(null);
   const [nextPageKey, setNextPageKey] = useState<string | null>(null);
+  const [events, setEvents] = useState<OnrampEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [eventsExpanded, setEventsExpanded] = useState(true);
+  const [webViewEvents, setWebViewEvents] = useState<WebViewEvent[]>([]);
+  const [webViewEventsExpanded, setWebViewEventsExpanded] = useState(true);
 
   const [alertState, setAlertState] = useState<{
     visible: boolean;
@@ -130,6 +138,20 @@ export default function History() {
     }
   }, [currentUser?.userId, getAccessToken, transactions.length]);
 
+  const loadEvents = useCallback(async () => {
+    setLoadingEvents(true);
+    try {
+      const isTestFlight = isTestSessionActive();
+      const token = isTestFlight ? 'testflight-mock-token' : (await getAccessToken() || '');
+      const result = await fetchOnrampEvents(token);
+      setEvents(result);
+    } catch (error) {
+      console.error('❌ [EVENTS] Failed to load events:', error);
+    } finally {
+      setLoadingEvents(false);
+    }
+  }, [getAccessToken]);
+
   useFocusEffect(
     useCallback(() => {
       const isTestFlight = isTestSessionActive();
@@ -137,11 +159,14 @@ export default function History() {
       console.log('History tab focused, userId:', userId);
       setCurrentUserRef(userId || null);
 
-      // Auto-load transactions when tab becomes active
+      // Auto-load transactions and events when tab becomes active
       if (userId) {
         loadTransactions();
+        loadEvents();
       }
-    }, [currentUser?.userId, loadTransactions])
+      // WebView events are in-memory — just read them directly
+      setWebViewEvents(getWebViewEvents());
+    }, [currentUser?.userId, loadTransactions, loadEvents])
   );
 
   useEffect(() => {
@@ -204,6 +229,28 @@ export default function History() {
     });
   };
 
+  const formatRelativeTime = (timestamp: string) => {
+    const d = new Date(timestamp);
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  };
+
+  const getEventColor = (eventType: string) => {
+    const lower = eventType.toLowerCase();
+    if (lower.includes('success') || lower.includes('commit')) return '#00D632';
+    if (lower.includes('fail') || lower.includes('error') || lower.includes('cancel')) return '#FF6B6B';
+    if (lower.includes('pending') || lower.includes('processing') || lower.includes('polling')) return '#FF8500';
+    if (lower.includes('load')) return BLUE;
+    return TEXT_SECONDARY;
+  };
+
+  const formatEventLabel = (eventType: string) => {
+    // "onramp.transaction.pending_risk" → "Pending Risk"
+    // "onramp_api.commit_success" → "Commit Success"
+    const parts = eventType.split(/[._](?=[a-z])/);
+    const label = parts.slice(-2).join(' ') || eventType;
+    return label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   const renderTransaction = ({ item }: { item: Transaction }) => {
     const isFailed = isFailedTransaction(item.status);
 
@@ -248,35 +295,85 @@ export default function History() {
     );
   };
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Onramp Transaction History</Text>
-        <Pressable
-          onPress={handleRefresh}
-          disabled={loading}
-          style={({ pressed }) => [
-            styles.refreshButton,
-            pressed && { opacity: 0.7 },
-            loading && { opacity: 0.5 },
-          ]}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color={BLUE} />
-          ) : (
-            <Ionicons name="refresh" size={20} color={BLUE} />
-          )}
-        </Pressable>
-      </View>
-
+  const renderListHeader = () => (
+    <>
       <View style={styles.userRefSection}>
         <Text style={styles.userRefLabel}>User ID:</Text>
-        <Text style={styles.userRefValue}>
-          {currentUserRef || "Loading..."}
-        </Text>
+        <Text style={styles.userRefValue}>{currentUserRef || "Loading..."}</Text>
       </View>
 
-      {transactions.length === 0 ? (
+      {/* Webhook Events Card */}
+      <View style={styles.eventsCard}>
+        <Pressable style={styles.eventsCardHeader} onPress={() => setEventsExpanded(prev => !prev)}>
+          <View style={styles.eventsCardTitleRow}>
+            <View style={styles.eventsDot} />
+            <Text style={styles.eventsCardTitle}>Webhook Events</Text>
+            {loadingEvents && <ActivityIndicator size="small" color={BLUE} style={{ marginLeft: 8 }} />}
+          </View>
+          <Ionicons name={eventsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={TEXT_SECONDARY} />
+        </Pressable>
+        {eventsExpanded && (
+          <View style={styles.eventsCardBody}>
+            {events.length === 0 ? (
+              <Text style={styles.eventsEmpty}>No events yet — make an onramp transaction to see live webhook events here</Text>
+            ) : (
+              events.map((event, index) => (
+                <View key={`${event.transactionId}-${index}`} style={[styles.eventRow, index > 0 && styles.eventRowBorder]}>
+                  <View style={[styles.eventColorBar, { backgroundColor: getEventColor(event.eventType) }]} />
+                  <View style={styles.eventRowContent}>
+                    <View style={styles.eventRowTop}>
+                      <Text style={[styles.eventType, { color: getEventColor(event.eventType) }]}>{formatEventLabel(event.eventType)}</Text>
+                      <Text style={styles.eventTime}>{formatRelativeTime(event.timestamp)}</Text>
+                    </View>
+                    {(event.amount || event.network) && (
+                      <Text style={styles.eventMeta}>
+                        {[event.amount && event.currency ? `${event.amount} ${event.currency}` : null, event.network, event.failureReason].filter(Boolean).join(' · ')}
+                      </Text>
+                    )}
+                    {event.transactionId && <Text style={styles.eventTxId} numberOfLines={1}>{event.transactionId}</Text>}
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+      </View>
+
+      {/* Apple Pay / Google Pay WebView Events */}
+      <View style={styles.eventsCard}>
+        <Pressable style={styles.eventsCardHeader} onPress={() => setWebViewEventsExpanded(prev => !prev)}>
+          <View style={styles.eventsCardTitleRow}>
+            <View style={[styles.eventsDot, { backgroundColor: '#FF8500' }]} />
+            <Text style={styles.eventsCardTitle}>Apple Pay Events</Text>
+          </View>
+          <Ionicons name={webViewEventsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={TEXT_SECONDARY} />
+        </Pressable>
+        {webViewEventsExpanded && (
+          <View style={styles.eventsCardBody}>
+            {webViewEvents.length === 0 ? (
+              <Text style={styles.eventsEmpty}>No events yet — start an Apple Pay or Google Pay transaction</Text>
+            ) : (
+              webViewEvents.map((event, index) => (
+                <View key={`${event.eventName}-${index}`} style={[styles.eventRow, index > 0 && styles.eventRowBorder]}>
+                  <View style={[styles.eventColorBar, { backgroundColor: getEventColor(event.eventName) }]} />
+                  <View style={styles.eventRowContent}>
+                    <View style={styles.eventRowTop}>
+                      <Text style={[styles.eventType, { color: getEventColor(event.eventName) }]}>{formatEventLabel(event.eventName)}</Text>
+                      <Text style={styles.eventTime}>{formatRelativeTime(event.timestamp)}</Text>
+                    </View>
+                    <Text style={styles.eventMeta}>{event.paymentMethod}</Text>
+                    <Text style={styles.eventRaw}>
+                      {JSON.stringify({ eventName: event.eventName, data: event.data ?? {} }, null, 2)}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+      </View>
+
+      {transactions.length === 0 && (
         <View style={styles.emptyState}>
           <Ionicons name="time-outline" size={64} color={TEXT_SECONDARY} />
           <Text style={styles.emptyTitle}>No Transactions Yet</Text>
@@ -286,41 +383,58 @@ export default function History() {
               : "Sign in to view your transaction history"}
           </Text>
         </View>
-      ) : (
-          <FlatList
-            data={transactions}
-            renderItem={renderTransaction}
-            keyExtractor={(item) => item.transaction_id}
-            contentContainerStyle={styles.listContainer}
-            showsVerticalScrollIndicator={false}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.5}
-            ListFooterComponent={() =>
-              loadingMore ? (
-                <View style={styles.footerLoader}>
-                  <ActivityIndicator size="small" color={BLUE} />
-                  <Text style={styles.footerText}>Loading more...</Text>
-                </View>
-              ) : nextPageKey ? (
-                <View style={styles.footerLoader}>
-                  <Text style={styles.footerText}>Scroll to load more</Text>
-                </View>
-              ) : transactions.length > 0 ? (
-                <View style={styles.footerLoader}>
-                  <Text style={styles.footerText}>No more transactions</Text>
-                </View>
-              ) : null
-            }
-          />
-        )}
-          <CoinbaseAlert
-            visible={alertState.visible}
-            title={alertState.title}
-            message={alertState.message}
-            type={alertState.type}
-            onConfirm={() => setAlertState(prev => ({ ...prev, visible: false }))}
-          />
+      )}
+    </>
+  );
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Onramp Transaction History</Text>
+        <Pressable
+          onPress={handleRefresh}
+          disabled={loading}
+          style={({ pressed }) => [styles.refreshButton, pressed && { opacity: 0.7 }, loading && { opacity: 0.5 }]}
+        >
+          {loading ? <ActivityIndicator size="small" color={BLUE} /> : <Ionicons name="refresh" size={20} color={BLUE} />}
+        </Pressable>
+      </View>
+
+      <FlatList
+        data={transactions}
+        renderItem={renderTransaction}
+        keyExtractor={(item) => item.transaction_id}
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ListHeaderComponent={renderListHeader}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={() =>
+          loadingMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator size="small" color={BLUE} />
+              <Text style={styles.footerText}>Loading more...</Text>
+            </View>
+          ) : nextPageKey ? (
+            <View style={styles.footerLoader}>
+              <Text style={styles.footerText}>Scroll to load more</Text>
+            </View>
+          ) : transactions.length > 0 ? (
+            <View style={styles.footerLoader}>
+              <Text style={styles.footerText}>No more transactions</Text>
+            </View>
+          ) : null
+        }
+      />
+
+      <CoinbaseAlert
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        type={alertState.type}
+        onConfirm={() => setAlertState(prev => ({ ...prev, visible: false }))}
+      />
     </View>
   );
 }
@@ -386,7 +500,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   listContainer: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   transactionItem: {
     flexDirection: 'row',
@@ -596,5 +711,101 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: TEXT_SECONDARY,
     textAlign: 'center',
+  },
+  eventsCard: {
+    backgroundColor: CARD_BG,
+    marginHorizontal: 20,
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    overflow: 'hidden',
+  },
+  eventsCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  eventsCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  eventsDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: BLUE,
+    marginRight: 8,
+  },
+  eventsCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: TEXT_PRIMARY,
+  },
+  eventsCardBody: {
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  eventsEmpty: {
+    fontSize: 13,
+    color: TEXT_SECONDARY,
+    textAlign: 'center',
+    padding: 16,
+    lineHeight: 18,
+  },
+  eventRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingVertical: 10,
+    paddingRight: 16,
+  },
+  eventRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  eventColorBar: {
+    width: 3,
+    borderRadius: 2,
+    marginLeft: 12,
+    marginRight: 10,
+    minHeight: 20,
+  },
+  eventRowContent: {
+    flex: 1,
+    gap: 2,
+  },
+  eventRowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  eventType: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  eventTime: {
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+  },
+  eventMeta: {
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+  },
+  eventTxId: {
+    fontSize: 10,
+    fontFamily: 'monospace',
+    color: TEXT_SECONDARY,
+    opacity: 0.6,
+  },
+  eventRaw: {
+    fontSize: 10,
+    fontFamily: 'monospace',
+    color: TEXT_SECONDARY,
+    backgroundColor: DARK_BG,
+    padding: 6,
+    borderRadius: 4,
+    marginTop: 4,
   },
 });
