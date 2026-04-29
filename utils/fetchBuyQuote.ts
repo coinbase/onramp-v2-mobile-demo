@@ -29,6 +29,7 @@ export async function fetchBuyQuote(payload: {
 
   if (isGuestCheckout) {
     try {
+      const partnerUserRef = isSandbox ? 'sandbox-HSAHDSBDFH' : 'HSAHDSBDFH';
       const response = await createGuestCheckoutOrder({
         ...payload,
         isQuote: false,
@@ -37,7 +38,7 @@ export async function fetchBuyQuote(payload: {
         phoneNumber: '+12345678901',
         agreementAcceptedAt: new Date().toISOString(),
         phoneNumberVerifiedAt: new Date().toISOString(),
-        partnerUserRef: isSandbox ? 'sandbox-HSAHDSBDFH' : 'HSAHDSBDFH',
+        partnerUserRef,
         destinationAddress,
       });
 

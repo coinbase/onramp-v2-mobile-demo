@@ -366,6 +366,7 @@ export function useOnramp() {
         paymentCurrency: formData.paymentCurrency,
         country,
         subdivision,
+        redirectUrl: 'onrampdemo://onramp-return',
       });
 
       let url = res?.session?.onrampUrl;

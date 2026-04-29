@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { WebView } from "react-native-webview";
+import { addWebViewEvent } from "../../utils/sharedState";
 
 /**
  * Shared Guest Checkout WebView Widget for Apple Pay (iOS) and Google Pay (Android).
@@ -133,6 +134,14 @@ export function APIGuestCheckoutWidget({
           const data = JSON.parse(nativeEvent.data);
           const { eventName } = data;
           console.log(`[${config.label}] ${eventName}`, data.data ?? '');
+
+          // Store event in shared state so History tab can display it
+          addWebViewEvent({
+            eventName,
+            timestamp: new Date().toISOString(),
+            paymentMethod: config.label,
+            data: data.data,
+          });
 
           switch (eventName) {
             case "onramp_api.load_pending":

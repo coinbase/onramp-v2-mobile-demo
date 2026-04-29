@@ -123,6 +123,28 @@ let pendingOfframpBalance: any = null;
 export const setPendingOfframpBalance = (balance: any) => { pendingOfframpBalance = balance; };
 export const getPendingOfframpBalance = () => pendingOfframpBalance;
 
+// ============================================================================
+// WEBVIEW EVENTS (Apple Pay / Google Pay)
+// ============================================================================
+// In-memory log of onramp_api.* postMessage events from the headless WebView.
+// Cleared on app restart — no persistence needed, just for live debugging in History tab.
+
+export type WebViewEvent = {
+  eventName: string;
+  timestamp: string;
+  paymentMethod: string; // 'Apple Pay' | 'Google Pay'
+  data?: Record<string, any>;
+};
+
+const MAX_WEBVIEW_EVENTS = 50;
+let webViewEvents: WebViewEvent[] = [];
+
+export const addWebViewEvent = (event: WebViewEvent) => {
+  webViewEvents = [event, ...webViewEvents].slice(0, MAX_WEBVIEW_EVENTS);
+};
+export const getWebViewEvents = () => webViewEvents;
+export const clearWebViewEvents = () => { webViewEvents = []; };
+
 export const getCountry = () => currentCountry;
 export const setCountry = (c: string) => { currentCountry = c; };
 
