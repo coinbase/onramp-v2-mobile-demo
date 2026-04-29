@@ -641,7 +641,7 @@ type WebhookEvent = {
   network?: string;
   failureReason?: string;
 };
-const MAX_EVENTS_PER_USER = 50;
+const MAX_EVENTS_PER_USER = 3;
 const eventLogStore = new Map<string, WebhookEvent[]>();
 
 async function storeWebhookEvent(partnerUserRef: string, event: WebhookEvent) {
