@@ -202,7 +202,15 @@ ipconfig getifaddr en0
    - Enter amount
 2. **Choose Payment**:
    - **Apple Pay**: Native iOS payment
-   - **Coinbase Widget**: Opens in-app browser (ASWebAuthenticationSession) with a deep link redirect back to the app on completion
+   - **Coinbase Widget**: Opens in-app browser (ASWebAuthenticationSession) with a deep link redirect back to the app on completion — see video below
+
+> **Coinbase Widget setup notes:**
+> - The app display name shown in the widget (e.g. "Onramp Mobile Demo") comes from Onramp Display Name in the [CDP Portal](https://portal.cdp.coinbase.com/)
+> - `redirectUrl` must be added to your Onramp Domain Allowlist — see [security requirements](https://docs.cdp.coinbase.com/onramp/security-requirements)
+
+https://github.com/user-attachments/assets/388d92a8-151f-488e-b104-da9364cfed1b
+
+<img src="https://github.com/user-attachments/assets/7fa36483-2a69-4d0f-b495-b9f250b40601" width="300" />
 3. **Complete Purchase**
 4. **Receive Notification**: Transaction status notification on Production
 
@@ -236,10 +244,6 @@ Convert crypto in your mainnet wallet back to fiat:
 #### Offramp Cash Out Demo
 https://github.com/user-attachments/assets/445e487d-50f6-443b-8072-e4e178668ac7
 
-#### Coinbase Widget — In-App Browser with Deep Link Redirect
-https://github.com/user-attachments/assets/388d92a8-151f-488e-b104-da9364cfed1b
-
-![Coinbase Widget in-app browser showing pay.coinbase.com](https://github.com/user-attachments/assets/7fa36483-2a69-4d0f-b495-b9f250b40601)
 
 ## Project Structure
 
