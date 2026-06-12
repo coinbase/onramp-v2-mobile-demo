@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { BASE_URL } from "../constants/BASE_URL";
 import type { AppAttestation } from "./appAttest";
+import { a2aLog } from "./app2appLog";
 
 /**
  * ============================================================================
@@ -137,7 +138,7 @@ export interface App2AppSession {
 export async function createOnrampMobileChallenge(
   params: App2AppOrderParams,
 ): Promise<App2AppChallenge> {
-  console.log('📤 [APP2APP] createOnrampMobileChallenge', {
+  a2aLog('📤 [APP2APP] createOnrampMobileChallenge', {
     appId: params.appId,
     purchaseCurrency: params.purchaseCurrency,
     destinationNetwork: params.destinationNetwork,
@@ -150,7 +151,7 @@ export async function createOnrampMobileChallenge(
     body: JSON.stringify(params),
   });
 
-  console.log('📥 [APP2APP] challenge status:', res.status, res.statusText);
+  a2aLog('📥 [APP2APP] challenge status:', res.status, res.statusText);
 
   if (!res.ok) {
     throw new Error(await readApiError(res, 'Failed to create onramp mobile challenge'));
@@ -190,7 +191,7 @@ export async function createOnrampMobileChallenge(
 export async function createOnrampAttestationChallenge(
   projectId: string,
 ): Promise<App2AppChallenge> {
-  console.log('📤 [APP2APP] createOnrampAttestationChallenge', { projectId });
+  a2aLog('📤 [APP2APP] createOnrampAttestationChallenge', { projectId });
 
   const res = await fetch(`${BASE_URL}/app2app/mobile/attestation/challenges`, {
     method: 'POST',
@@ -198,7 +199,7 @@ export async function createOnrampAttestationChallenge(
     body: JSON.stringify({ projectId }),
   });
 
-  console.log('📥 [APP2APP] attestation challenge status:', res.status, res.statusText);
+  a2aLog('📥 [APP2APP] attestation challenge status:', res.status, res.statusText);
 
   if (!res.ok) {
     throw new Error(await readApiError(res, 'Failed to create onramp attestation challenge'));
@@ -223,7 +224,7 @@ export async function registerOnrampAttestation(args: {
 }): Promise<OnrampAttestationRegistration> {
   const { projectId, challenge, ios } = args;
 
-  console.log('📤 [APP2APP] registerOnrampAttestation', {
+  a2aLog('📤 [APP2APP] registerOnrampAttestation', {
     projectId,
     keyId: ios.keyId?.slice(0, 8),
     bundleId: ios.bundleId,
@@ -235,7 +236,7 @@ export async function registerOnrampAttestation(args: {
     body: JSON.stringify({ projectId, challenge, ios }),
   });
 
-  console.log('📥 [APP2APP] attestation registration status:', res.status, res.statusText);
+  a2aLog('📥 [APP2APP] attestation registration status:', res.status, res.statusText);
 
   if (!res.ok) {
     throw new Error(await readApiError(res, 'Failed to register onramp attestation'));
@@ -245,7 +246,7 @@ export async function registerOnrampAttestation(args: {
   if (!data?.identifier || !data?.keyId) {
     throw new Error(`Unexpected registration response: ${JSON.stringify(data)}`);
   }
-  console.log('✅ [APP2APP] device registered:', data.identifier);
+  a2aLog('✅ [APP2APP] device registered:', data.identifier);
   return data as OnrampAttestationRegistration;
 }
 
@@ -282,7 +283,7 @@ export async function createOnrampMobileSession(args: {
 }): Promise<App2AppSession> {
   const { challenge, attestation } = args;
 
-  console.log('📤 [APP2APP] createOnrampMobileSession', {
+  a2aLog('📤 [APP2APP] createOnrampMobileSession', {
     provider: attestation.provider,
     isMock: attestation.isMock,
   });
@@ -295,7 +296,7 @@ export async function createOnrampMobileSession(args: {
     body: JSON.stringify(body),
   });
 
-  console.log('📥 [APP2APP] session status:', res.status, res.statusText);
+  a2aLog('📥 [APP2APP] session status:', res.status, res.statusText);
 
   if (!res.ok) {
     throw new Error(await readApiError(res, 'Failed to create onramp mobile session'));
@@ -312,7 +313,7 @@ export async function createOnrampMobileSession(args: {
     throw new Error(`Could not extract sessionToken from onrampUrl: ${onrampUrl}`);
   }
 
-  console.log('✅ [APP2APP] session created');
+  a2aLog('✅ [APP2APP] session created');
   return { onrampUrl, sessionToken };
 }
 

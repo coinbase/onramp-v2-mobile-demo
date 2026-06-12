@@ -42,6 +42,7 @@ import {
   type App2AppOrderParams,
 } from "../utils/createApp2AppSession";
 import { openCoinbaseApp2App } from "../utils/openCoinbaseApp2App";
+import { a2aLog, a2aWarn } from "../utils/app2appLog";
 import { setCurrentPartnerUserRef } from "../utils/sharedState";
 
 /** Inputs for a single app2app onramp, supplied by the form/caller. */
@@ -82,7 +83,7 @@ const BUNDLE_ID = APP_ATTEST_APP_ID.includes(".")
 async function ensureDeviceRegistered(): Promise<void> {
   if (Platform.OS !== "ios") return;
   if (await isDeviceRegistered()) {
-    console.log("🔐 [APP2APP] Device key already registered — skipping registration");
+    a2aLog("🔐 [APP2APP] Device key already registered — skipping registration");
     return;
   }
 
@@ -92,7 +93,7 @@ async function ensureDeviceRegistered(): Promise<void> {
   // 2. Attest the Secure Enclave key over SHA-256(base64url_decode(challenge)).
   const attestation = await attestDeviceKey(challenge);
   if (attestation.isMock) {
-    console.warn(
+    a2aWarn(
       "⚠️ [APP2APP] Mock attestation (no Secure Enclave) — skipping upstream registration",
     );
     return;
@@ -138,7 +139,7 @@ export function useApp2App() {
         if (!supported) {
           // Not fatal in the demo — getAppAttestation falls back to a mock when
           // there's no native module (Expo Go / web) or unsupported hardware.
-          console.warn('⚠️ [APP2APP] Hardware attestation unavailable — using stub attestation');
+          a2aWarn('⚠️ [APP2APP] Hardware attestation unavailable — using stub attestation');
         }
 
         // 0. One-time per-install device-key registration (iOS App Attest).

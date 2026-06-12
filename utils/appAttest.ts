@@ -45,6 +45,7 @@ import type {
   AppAttestNativeModule,
   AttestationProvider,
 } from '../modules/app-attest';
+import { a2aLog, a2aWarn } from './app2appLog';
 
 /**
  * The demo challenge. onramp-service's challenge endpoint isn't implemented
@@ -117,7 +118,7 @@ export async function isAppAttestSupported(): Promise<boolean> {
   try {
     return await native.isSupported();
   } catch (e) {
-    console.warn('⚠️ [APP ATTEST] isSupported() threw:', e);
+    a2aWarn('⚠️ [APP ATTEST] isSupported() threw:', e);
     return false;
   }
 }
@@ -136,7 +137,7 @@ export async function getOrCreateAppAttestKeyId(): Promise<string> {
 
   if (!native) {
     // MOCK: fabricate (and persist) a stable mock keyId.
-    console.warn('⚠️ [APP ATTEST] Native module missing — using MOCK keyId');
+    a2aWarn('⚠️ [APP ATTEST] Native module missing — using MOCK keyId');
     return getOrCreateMockKeyId();
   }
 
@@ -145,11 +146,11 @@ export async function getOrCreateAppAttestKeyId(): Promise<string> {
   // sideloaded debug build), don't throw — return '' so getAppAttestation can
   // fall back to a mock attestation for the demo.
   if (native.provider === 'android-play-integrity') {
-    console.log('🔑 [APP ATTEST] Preparing Play Integrity token provider…');
+    a2aLog('🔑 [APP ATTEST] Preparing Play Integrity token provider…');
     try {
       return await native.generateKey();
     } catch (e) {
-      console.warn('⚠️ [APP ATTEST] Play Integrity prepare failed — will use mock:', e);
+      a2aWarn('⚠️ [APP ATTEST] Play Integrity prepare failed — will use mock:', e);
       return '';
     }
   }
@@ -157,14 +158,14 @@ export async function getOrCreateAppAttestKeyId(): Promise<string> {
   // iOS: reuse the persisted Secure Enclave keyId if present.
   const existing = await SecureStore.getItemAsync(KEY_ID_STORE_KEY).catch(() => null);
   if (existing) {
-    console.log('🔑 [APP ATTEST] Reusing stored keyId');
+    a2aLog('🔑 [APP ATTEST] Reusing stored keyId');
     return existing;
   }
 
-  console.log('🔑 [APP ATTEST] Generating new Secure Enclave key…');
+  a2aLog('🔑 [APP ATTEST] Generating new Secure Enclave key…');
   const keyId = await native.generateKey();
   await SecureStore.setItemAsync(KEY_ID_STORE_KEY, keyId).catch((e) =>
-    console.warn('⚠️ [APP ATTEST] Failed to persist keyId:', e),
+    a2aWarn('⚠️ [APP ATTEST] Failed to persist keyId:', e),
   );
   return keyId;
 }
@@ -205,7 +206,7 @@ export async function isDeviceRegistered(): Promise<boolean> {
 export async function markDeviceRegistered(keyId: string): Promise<void> {
   await Promise.all([
     SecureStore.setItemAsync(REGISTERED_STORE_KEY, keyId).catch((e) =>
-      console.warn('⚠️ [APP ATTEST] Failed to persist registered flag:', e),
+      a2aWarn('⚠️ [APP ATTEST] Failed to persist registered flag:', e),
     ),
     SecureStore.setItemAsync(ATTESTED_STORE_KEY, keyId).catch(() => {}),
   ]);
@@ -282,17 +283,17 @@ export async function attestDeviceKey(challenge: string): Promise<DeviceAttestat
   if (native && native.provider === 'apple-app-attest') {
     try {
       const keyId = await getOrCreateAppAttestKeyId();
-      console.log('🛡️ [APP ATTEST] attestKey() — one-time device-key registration…');
+      a2aLog('🛡️ [APP ATTEST] attestKey() — one-time device-key registration…');
       const attestation = await native.attestKey(keyId, clientDataHashB64);
-      console.log(
+      a2aLog(
         `✅ [APP ATTEST] Real Apple attestation GENERATED (keyId=${keyId.slice(0, 8)}…, bytes=${attestation.length})`,
       );
       return { keyId, attestation, provider: native.provider, isMock: false };
     } catch (e) {
-      console.warn('⚠️ [APP ATTEST] attestKey() failed — falling back to mock:', e);
+      a2aWarn('⚠️ [APP ATTEST] attestKey() failed — falling back to mock:', e);
     }
   } else {
-    console.warn('⚠️ [APP ATTEST] No Apple App Attest — returning MOCK attestation');
+    a2aWarn('⚠️ [APP ATTEST] No Apple App Attest — returning MOCK attestation');
   }
 
   const mockKeyId = await getOrCreateMockKeyId();
@@ -344,12 +345,12 @@ export async function getAppAttestation(
         const alreadyAttested = attestedKeyId === keyId;
 
         if (!alreadyAttested) {
-          console.log('🛡️ [APP ATTEST] First-time attestKey() (one-time key registration)…');
+          a2aLog('🛡️ [APP ATTEST] First-time attestKey() (one-time key registration)…');
           const attestationObject = await native.attestKey(keyId, clientDataHashB64);
           await SecureStore.setItemAsync(ATTESTED_STORE_KEY, keyId).catch((e) =>
-            console.warn('⚠️ [APP ATTEST] Failed to persist attested flag:', e),
+            a2aWarn('⚠️ [APP ATTEST] Failed to persist attested flag:', e),
           );
-          console.log(
+          a2aLog(
             `✅ [APP ATTEST] Real Apple App Attest GENERATED (kind=attestation, provider=${native.provider}, keyId=${keyId.slice(0, 8)}…, bytes=${attestationObject.length})`,
           );
           return {
@@ -362,9 +363,9 @@ export async function getAppAttestation(
           };
         }
 
-        console.log('✍️ [APP ATTEST] generateAssertion() (per-request, key already attested)…');
+        a2aLog('✍️ [APP ATTEST] generateAssertion() (per-request, key already attested)…');
         const assertion = await native.generateAssertion(keyId, clientDataHashB64);
-        console.log(
+        a2aLog(
           `✅ [APP ATTEST] Real Apple App Attest GENERATED (kind=assertion, provider=${native.provider}, keyId=${keyId.slice(0, 8)}…, bytes=${assertion.length})`,
         );
         return {
@@ -378,7 +379,7 @@ export async function getAppAttestation(
       }
 
       // Android Play Integrity: fresh token per request.
-      console.log(`🛡️ [APP ATTEST] Attesting via ${native.provider}…`);
+      a2aLog(`🛡️ [APP ATTEST] Attesting via ${native.provider}…`);
       const attestationObject = await native.attestKey(keyId, clientDataHashB64);
       return {
         keyId,
@@ -392,10 +393,10 @@ export async function getAppAttestation(
       // Real attestation can fail on the simulator (iOS) or on a sideloaded
       // build without Play Integrity config (Android). Fall back to the mock so
       // the demo flow still completes end-to-end.
-      console.warn('⚠️ [APP ATTEST] Native attestation failed — falling back to mock:', e);
+      a2aWarn('⚠️ [APP ATTEST] Native attestation failed — falling back to mock:', e);
     }
   } else {
-    console.warn('⚠️ [APP ATTEST] Native module missing — returning MOCK attestation');
+    a2aWarn('⚠️ [APP ATTEST] Native module missing — returning MOCK attestation');
   }
 
   // MOCK: deterministic, clearly-fake attestation object. Use a mock keyId since

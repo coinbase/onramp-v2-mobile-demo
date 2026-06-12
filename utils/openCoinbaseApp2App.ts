@@ -1,5 +1,6 @@
 import { Linking } from "react-native";
 import type { App2AppSession } from "./createApp2AppSession";
+import { a2aLog } from "./app2appLog";
 
 /**
  * ============================================================================
@@ -65,7 +66,7 @@ export async function openCoinbaseApp2App(
   params: App2AppHandoffParams,
 ): Promise<boolean> {
   const url = buildApp2AppUrl(session, params);
-  console.log('🔗 [APP2APP] Opening Coinbase onramp:', url);
+  a2aLog('🔗 [APP2APP] Opening Coinbase onramp:', url);
 
   try {
     // Universal link: opens the Coinbase app when installed (and the
