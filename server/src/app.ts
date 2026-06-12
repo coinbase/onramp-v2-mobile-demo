@@ -429,11 +429,13 @@ async function proxyOnrampMobile(
     data = { errorMessage: text };
   }
 
-  const ms = Date.now() - startedAt;
-  const icon = upstream.ok ? '✅' : '❌';
-  console.log(`\n┌─ [APP2APP] ${label} ◀ RESPONSE ${icon} ${upstream.status} (${ms}ms) ─────────`);
-  console.log(`│ ${JSON.stringify(data, null, 2).replace(/\n/g, '\n│ ')}`);
-  console.log(`└──────────────────────────────────────────────────────────────\n`);
+  if (APP2APP_VERBOSE) {
+    const ms = Date.now() - startedAt;
+    const icon = upstream.ok ? '✅' : '❌';
+    console.log(`\n┌─ [APP2APP] ${label} ◀ RESPONSE ${icon} ${upstream.status} (${ms}ms) ─────────`);
+    console.log(`│ ${JSON.stringify(data, null, 2).replace(/\n/g, '\n│ ')}`);
+    console.log(`└──────────────────────────────────────────────────────────────\n`);
+  }
 
   res.status(upstream.status).json(data);
 }
