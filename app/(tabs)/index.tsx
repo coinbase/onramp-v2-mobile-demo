@@ -95,7 +95,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import * as WebBrowser from 'expo-web-browser';
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { APIGuestCheckoutWidget, OnrampForm, useOnramp } from "../../components";
+import { APIGuestCheckoutWidget, OnrampForm, useApp2App, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
@@ -345,6 +345,8 @@ export default function Index() {
     getAssetSymbolFromName
   } = useOnramp();
 
+  const { startApp2App } = useApp2App();
+
   // Refetch options is handled on screen focus and within OnrampForm when needed
 
   // Track region changes and refetch buy options
@@ -531,6 +533,30 @@ export default function Index() {
         asset: assetApiName,
         network: networkApiName
       });
+
+      // App-to-app: device-attested hand-off to the Coinbase retail app via the
+      // https://coinbase.com/onramp universal link. No phone/email verification —
+      // the iOS App Attest / Android Play Integrity attestation is the trust
+      // anchor (see useApp2App).
+      if ((formData.paymentMethod || '').toUpperCase() === 'APP2APP_COINBASE') {
+        const opened = await startApp2App({
+          purchaseCurrency: assetApiName,
+          destinationNetwork: networkApiName,
+          destinationAddress: targetAddress,
+          paymentAmount: updatedFormData.amount,
+          paymentCurrency: updatedFormData.paymentCurrency || 'USD',
+        });
+        if (!opened) {
+          setApplePayAlert({
+            visible: true,
+            title: 'Coinbase app not found',
+            message: 'We could not open the Coinbase app for the app-to-app hand-off. Install or update Coinbase and try again.',
+            type: 'info',
+          });
+        }
+        setIsProcessingPayment(false);
+        return; // do not call createOrder()
+      }
 
       // Coinbase Widget: skip phone/email verification
       if ((formData.paymentMethod || '').toUpperCase() === 'COINBASE_WIDGET') {
@@ -743,7 +769,7 @@ export default function Index() {
       console.error('Error submitting form:', error);
       setIsProcessingPayment(false);
     }
-  }, [createOrder, createWidgetSession, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction]);
+  }, [createOrder, createWidgetSession, startApp2App, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction]);
     
   
   return (

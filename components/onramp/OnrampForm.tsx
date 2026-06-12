@@ -345,6 +345,11 @@ const usSubs = useMemo(() => {
         arr.push({ display: 'Apple Pay API', value: 'GUEST_CHECKOUT_APPLE_PAY' });
       }
     }
+    // App-to-app: device-attested hand-off to the Coinbase retail app
+    // (iOS App Attest / Android Play Integrity). Native-only (no web).
+    if (Platform.OS === 'ios' || Platform.OS === 'android') {
+      arr.push({ display: 'Pay with Coinbase (App2App)', value: 'APP2APP_COINBASE' });
+    }
     return arr;
   }, [country, paymentCurrency]);
   

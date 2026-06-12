@@ -80,7 +80,13 @@ export async function fetchBuyQuote(payload: {
       destinationNetwork: payload.destinationNetwork,
       paymentAmount: payload.paymentAmount,
       destinationAddress,
-      paymentMethod: payload.paymentMethod === 'COINBASE_WIDGET' ? 'CARD' : payload.paymentMethod
+      // COINBASE_WIDGET and APP2APP_COINBASE are UI-only selections, not valid
+      // onramp payment methods. Quote them as CARD for an indicative price; the
+      // App2App hand-off itself runs separately via startApp2App on submit.
+      paymentMethod:
+        payload.paymentMethod === 'COINBASE_WIDGET' || payload.paymentMethod === 'APP2APP_COINBASE'
+          ? 'CARD'
+          : payload.paymentMethod
     };
 
     console.log('📤 [API] fetchBuyQuote (Widget)');

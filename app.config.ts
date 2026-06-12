@@ -17,7 +17,27 @@ const config: ExpoConfig = {
       buildNumber: process.env.IOS_BUILD_NUMBER ?? '1.0.0', // bump each submit
       supportsTablet: false,
       infoPlist: {
-        ITSAppUsesNonExemptEncryption: false
+        ITSAppUsesNonExemptEncryption: false,
+        // Required so iOS prompts for (and grants) Local Network access. Without
+        // this the app silently cannot reach LAN addresses — e.g. the dev API
+        // server / Metro on the Mac's LAN IP — and requests hang forever.
+        NSLocalNetworkUsageDescription:
+          'Allow this demo to reach the local development API server on your network.',
+        // Allow Linking.canOpenURL to probe the Coinbase retail app for the
+        // app2app hand-off. Without this, canOpenURL returns false on iOS even
+        // when the Coinbase app is installed. These are the Coinbase app's
+        // registered app-to-app URL schemes (see its CFBundleURLSchemes).
+        LSApplicationQueriesSchemes: [
+          'com.coinbase.oauth.app-to-app-v3',
+          'com.coinbase.oauth.app-to-app-v2',
+          'cbpay',
+        ]
+      },
+      // Apple App Attest capability for the app2app device-attestation flow
+      // (modules/app-attest → DCAppAttestService). Use 'production' for
+      // App Store / TestFlight builds.
+      entitlements: {
+        'com.apple.developer.devicecheck.appattest-environment': 'development'
       }
     },
 

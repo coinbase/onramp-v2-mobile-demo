@@ -16,6 +16,7 @@ export { OnrampForm } from './onramp/OnrampForm';
 
 // Hooks
 export { useOnramp } from '../hooks/useOnramp';
+export { useApp2App } from '../hooks/useApp2App';
 
 // Utils
 export { createGuestCheckoutOrder } from '../utils/createGuestCheckoutOrder';

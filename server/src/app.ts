@@ -1,4 +1,5 @@
 import cors from 'cors';
+import crypto from 'crypto';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -57,6 +58,12 @@ const PORT = Number(process.env.PORT || 3000);
 
 // On Vercel, trust proxy to read x-forwarded-for
 app.set('trust proxy', true);
+
+// TEMP (device-reachability debugging): log every inbound request + source IP.
+app.use((req, _res, next) => {
+  console.log(`➡️  ${new Date().toISOString()} ${req.method} ${req.url} from ${req.socket.remoteAddress}`);
+  next();
+});
 
 // Rate limiter for webhook endpoint (DoS protection)
 // Limits expensive operations (DB lookups, external API calls)
@@ -131,8 +138,15 @@ app.get("/health", (_req, res) => {
 // 🔒 GLOBAL AUTHENTICATION MIDDLEWARE
 // All routes except /health and /webhooks require valid CDP access token
 app.use((req, res, next) => {
-  // Skip authentication for health check, webhooks, and debug endpoints
-  if (req.path === '/health' || req.path.startsWith('/webhooks') || req.path === '/push-tokens/ping') {
+  // Skip authentication for health check, webhooks, and debug endpoints.
+  // /app2app/* is intentionally PUBLIC — these requests are trusted via the
+  // iOS App Attest attestation in the body, not a CDP access token.
+  if (
+    req.path === '/health' ||
+    req.path.startsWith('/webhooks') ||
+    req.path === '/push-tokens/ping' ||
+    req.path.startsWith('/app2app')
+  ) {
     return next();
   }
 
@@ -285,6 +299,237 @@ app.post("/server/api", async (req, res) => {
   }
 });
 
+
+/**
+ * ============================================================================
+ * APP-TO-APP ONRAMP  —  PUBLIC MOBILE ENDPOINTS (CDP PROXY)
+ * ============================================================================
+ *
+ * Public counterpart to the create onramp order API. Unlike /server/api these
+ * routes are NOT JWT-signed and NOT behind the access-token middleware — the
+ * trust anchor is the platform attestation (iOS App Attest / Android Play
+ * Integrity) carried in the request body, not a CDP access token.
+ *
+ * These are thin pass-through proxies to the real CDP "onramp mobile" APIs
+ * shipped in cdp-api PR #1278 (c3/cdp-api). The 2-step app2app handoff:
+ *
+ *   1. POST /app2app/mobile/challenges  → { challenge, expiresAt }
+ *        Binds the transaction params (amount, asset, network, destination,
+ *        redirectUrl) to a server-issued opaque token, which doubles as the
+ *        attestation challenge.
+ *   2. POST /app2app/mobile/sessions    → { session: { onrampUrl }, quote? }
+ *        Verifies the device attestation/assertion signed over the challenge
+ *        and returns a ready-to-use onramp URL (with the session token embedded)
+ *        to hand off to the Coinbase retail app.
+ *
+ * Upstream (public, unauthenticated) CDP endpoints:
+ *   POST {base}/v2/onramp/mobile/challenges
+ *   POST {base}/v2/onramp/mobile/sessions
+ *
+ * We keep the proxy so the app talks to a single base URL (no CORS, central
+ * logging); no CDP JWT is added because the upstream is unauthenticated.
+ *
+ * The upstream environment is configurable for testing (see resolution below):
+ *   - CDP_API_BASE_URL  — explicit full base override (wins if set)
+ *   - CDP_ENV           — prod (default) | staging | dev
+ * dev/staging are internal Coinbase hosts (cbhq.net) and require network/VPN
+ * access. Defaults to production so nothing changes unless you opt in.
+ * ============================================================================
+ */
+
+// CDP API base per environment (path includes the `/platform` prefix).
+const CDP_API_BASE_PROD = 'https://api.cdp.coinbase.com/platform';
+const CDP_API_BASES: Record<string, string> = {
+  prod: CDP_API_BASE_PROD,
+  staging: 'https://cloud-api-staging.cbhq.net/platform',
+  dev: 'https://cloud-api-dev.cbhq.net/platform',
+};
+
+// Resolve the upstream base LAZILY (per request) rather than at module load:
+// dev.ts loads dotenv after the (hoisted) `import app`, so reading process.env
+// at module-eval time would miss .env values. An explicit CDP_API_BASE_URL
+// wins; otherwise pick by CDP_ENV; otherwise default to production.
+function resolveCdpApiBase(): string {
+  return (
+    process.env.CDP_API_BASE_URL ||
+    CDP_API_BASES[(process.env.CDP_ENV || 'prod').toLowerCase()] ||
+    CDP_API_BASE_PROD
+  ).replace(/\/+$/, '');
+}
+
+function onrampMobileBase(): string {
+  return `${resolveCdpApiBase()}/v2/onramp/mobile`;
+}
+
+/**
+ * Forwards a JSON body to a public (unauthenticated) CDP onramp-mobile endpoint
+ * and mirrors the upstream status + JSON back to the caller.
+ *
+ * For e2e testing this logs the full request + response of each upstream call.
+ * The bodies here contain transaction params, a platform attestation/assertion
+ * and a session URL — none of the prohibited PII categories — so they are safe
+ * to dump while debugging. This verbosity is gated on APP2APP_VERBOSE !== '0'.
+ */
+const APP2APP_VERBOSE = process.env.APP2APP_VERBOSE !== '0';
+
+async function proxyOnrampMobile(
+  label: string,
+  upstreamUrl: string,
+  body: unknown,
+  extraHeaders: Record<string, string>,
+  res: import('express').Response,
+): Promise<void> {
+  const startedAt = Date.now();
+
+  // The CDP onramp-mobile routes are spec'd `unauthenticated`, so we do NOT
+  // attach a JWT by default. Opt in with APP2APP_SIGN_JWT=1 only for debugging
+  // gateway auth behavior.
+  const authHeaders: Record<string, string> = {};
+  let jwtAttached = false;
+  if (
+    process.env.APP2APP_SIGN_JWT === '1' &&
+    process.env.CDP_API_KEY_ID &&
+    process.env.CDP_API_KEY_SECRET
+  ) {
+    try {
+      const u = new URL(upstreamUrl);
+      const token = await generateJwt({
+        apiKeyId: process.env.CDP_API_KEY_ID,
+        apiKeySecret: process.env.CDP_API_KEY_SECRET,
+        requestMethod: 'POST',
+        requestHost: u.hostname,
+        requestPath: u.pathname, // no query string — CDP signs pathname only
+        expiresIn: 120,
+      });
+      authHeaders.Authorization = `Bearer ${token}`;
+      jwtAttached = true;
+    } catch (e) {
+      console.error('⚠️ [APP2APP] Failed to sign CDP JWT:', e);
+    }
+  }
+
+  if (APP2APP_VERBOSE) {
+    console.log(`\n┌─ [APP2APP] ${label} ▶ REQUEST ────────────────────────────────`);
+    console.log(`│ POST ${upstreamUrl}  (jwt=${jwtAttached})`);
+    console.log(`│ body: ${JSON.stringify(body ?? {}, null, 2).replace(/\n/g, '\n│ ')}`);
+    console.log(`└──────────────────────────────────────────────────────────────`);
+  }
+
+  const upstream = await fetch(upstreamUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders, ...extraHeaders },
+    body: JSON.stringify(body ?? {}),
+  });
+
+  const text = await upstream.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { errorMessage: text };
+  }
+
+  const ms = Date.now() - startedAt;
+  const icon = upstream.ok ? '✅' : '❌';
+  console.log(`\n┌─ [APP2APP] ${label} ◀ RESPONSE ${icon} ${upstream.status} (${ms}ms) ─────────`);
+  console.log(`│ ${JSON.stringify(data, null, 2).replace(/\n/g, '\n│ ')}`);
+  console.log(`└──────────────────────────────────────────────────────────────\n`);
+
+  res.status(upstream.status).json(data);
+}
+
+// Step 1 — create challenge & bind session params.
+app.post('/app2app/mobile/challenges', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+
+    // Idempotency-Key is an accepted request parameter; forward the client's if
+    // present, otherwise mint one so retries are safe.
+    const idempotencyKey =
+      (req.header('Idempotency-Key') as string) || crypto.randomUUID();
+
+    await proxyOnrampMobile(
+      'createOnrampMobileChallenge',
+      `${onrampMobileBase()}/challenges`,
+      body,
+      { 'Idempotency-Key': idempotencyKey },
+      res,
+    );
+  } catch (error) {
+    console.error('❌ [APP2APP] challenge proxy error:', error);
+    res.status(502).json({ errorMessage: 'Failed to reach onramp mobile challenge API' });
+  }
+});
+
+// Step 2 — verify attestation & return the onramp session URL. Idempotent on
+// the challenge upstream, so no Idempotency-Key header is required.
+app.post('/app2app/mobile/sessions', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+
+    await proxyOnrampMobile(
+      'createOnrampMobileSession',
+      `${onrampMobileBase()}/sessions`,
+      body,
+      {},
+      res,
+    );
+  } catch (error) {
+    console.error('❌ [APP2APP] session proxy error:', error);
+    res.status(502).json({ errorMessage: 'Failed to reach onramp mobile session API' });
+  }
+});
+
+/**
+ * One-time iOS App Attest device-key REGISTRATION (cdp-api PR #1347,
+ * c3/cdp-api → /v2/onramp/mobile/attestation/*). iOS-only; Android validates
+ * Play Integrity inline per request and has no registration step.
+ *
+ *   A. POST /app2app/mobile/attestation/challenges    → { challenge, expiresAt }
+ *        Issues a one-time registration challenge for this project.
+ *   B. POST /app2app/mobile/attestation/registrations → { identifier, keyId, … }
+ *        Verifies the Apple attestation object signed over SHA-256(challenge)
+ *        and stores the device public key for later assertion checks.
+ *
+ * Both are public/unauthenticated (trust comes from the attestation itself), so
+ * we forward without a CDP JWT, mirroring the challenge/session proxies above.
+ */
+
+// Step A — issue a one-time iOS App Attest registration challenge.
+app.post('/app2app/mobile/attestation/challenges', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+
+    await proxyOnrampMobile(
+      'createOnrampAttestationChallenge',
+      `${onrampMobileBase()}/attestation/challenges`,
+      body,
+      {},
+      res,
+    );
+  } catch (error) {
+    console.error('❌ [APP2APP] attestation challenge proxy error:', error);
+    res.status(502).json({ errorMessage: 'Failed to reach onramp attestation challenge API' });
+  }
+});
+
+// Step B — verify the attestation object & register the device public key.
+app.post('/app2app/mobile/attestation/registrations', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+
+    await proxyOnrampMobile(
+      'registerOnrampAttestation',
+      `${onrampMobileBase()}/attestation/registrations`,
+      body,
+      {},
+      res,
+    );
+  } catch (error) {
+    console.error('❌ [APP2APP] attestation registration proxy error:', error);
+    res.status(502).json({ errorMessage: 'Failed to reach onramp attestation registration API' });
+  }
+});
 
 // Zod schema for EVM balance query validation (SSRF protection)
 const evmBalanceQuerySchema = z.object({

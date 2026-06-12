@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["AppAttestModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.appattest.AppAttestModule"]
+  }
+}
