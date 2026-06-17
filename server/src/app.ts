@@ -878,7 +878,7 @@ app.get('/balances/solana', async (req, res) => {
 // In-memory storage for local development
 const pushTokenStore = new Map<string, { token: string; platform: string; tokenType?: string; updatedAt: number }>();
 
-// In-memory webhook event log (keyed by partnerUserRef, capped at 50 events per user)
+// In-memory webhook event log (keyed by partnerUserRef, capped at MAX_EVENTS_PER_USER)
 type WebhookEvent = {
   eventType: string;
   transactionId: string | null;
@@ -887,9 +887,14 @@ type WebhookEvent = {
   currency?: string;
   network?: string;
   failureReason?: string;
+  rawBody?: Record<string, any>;
 };
-const MAX_EVENTS_PER_USER = 3;
+const MAX_EVENTS_PER_USER = 20;
 const eventLogStore = new Map<string, WebhookEvent[]>();
+
+// Temporary cache for offramp.transaction.created events that have no partnerUserRef yet.
+// Keyed by transactionId; flushed into the user's event log when a subsequent event resolves the ref.
+const pendingOfframpCreated = new Map<string, WebhookEvent>();
 
 async function storeWebhookEvent(partnerUserRef: string, event: WebhookEvent) {
   const sandboxKey = partnerUserRef.startsWith('sandbox-') ? partnerUserRef : `sandbox-${partnerUserRef}`;
@@ -1022,7 +1027,7 @@ app.get('/push-tokens/debug/:userId', async (req, res) => {
  * POST /webhooks/onramp
  *
  * Receives transaction status updates from Coinbase
- * Events: onramp.transaction.created, onramp.transaction.updated, onramp.transaction.success, onramp.transaction.failed
+ * Events: onramp/offramp.transaction.created/updated/success/failed
  *
  * Security: Verifies webhook signature using CDP API key + Rate limiting (DoS protection)
  * Use case: Send push notifications when transactions complete
@@ -1355,24 +1360,76 @@ app.post('/webhooks/onramp', webhookRateLimiter, async (req, res) => {
         }
         break;
 
+      case 'offramp.transaction.created':
+        console.log('📝 [WEBHOOK] Offramp transaction created:', txId);
+        break;
+
+      case 'offramp.transaction.updated':
+        console.log('🔄 [WEBHOOK] Offramp transaction updated:', txId);
+        break;
+
+      case 'offramp.transaction.success':
+        console.log('✅ [WEBHOOK] Offramp transaction completed:', txId);
+        break;
+
+      case 'offramp.transaction.failed':
+        console.log('❌ [WEBHOOK] Offramp transaction failed:', txId);
+        break;
+
       default:
-        console.log('ℹ️ [WEBHOOK] Unknown event type:', event);
+        console.log('ℹ️ [WEBHOOK] Unknown event type:', eventType);
     }
 
     // Store event in the in-memory log so the app can fetch and display it
-    const eventPartnerUserRef = webhookData.partnerUserRef || webhookData.failedPartnerUserRef;
+    // Offramp webhooks don't have a top-level partnerUserRef — extract it from redirectUrl query param
+    let eventPartnerUserRef = webhookData.partnerUserRef || webhookData.failedPartnerUserRef;
+    if (!eventPartnerUserRef && webhookData.redirectUrl) {
+      try {
+        const redirectUrl = new URL(webhookData.redirectUrl);
+        eventPartnerUserRef = redirectUrl.searchParams.get('partnerUserRef') || undefined;
+      } catch {}
+    }
+
+    // Onramp uses purchaseAmount/purchaseCurrency; offramp uses sellAmount.value/sellAmount.currency
+    const eventAmount = typeof webhookData.purchaseAmount === 'object'
+      ? webhookData.purchaseAmount?.value
+      : (webhookData.purchaseAmount || webhookData.sellAmount?.value || webhookData.paymentAmount);
+    const eventCurrency = webhookData.purchaseCurrency
+      || webhookData.sellAmount?.currency
+      || webhookData.paymentCurrency;
+    const eventNetwork = webhookData.destinationNetwork || webhookData.purchaseNetwork || webhookData.network;
+
+    if (!eventPartnerUserRef && eventType === 'offramp.transaction.created' && txId) {
+      // No partnerUserRef yet — cache by transactionId and flush when a subsequent event resolves it
+      pendingOfframpCreated.set(txId, {
+        eventType,
+        transactionId: txId,
+        timestamp: new Date().toISOString(),
+        amount: eventAmount,
+        currency: eventCurrency,
+        network: eventNetwork,
+        rawBody: webhookData,
+      });
+      console.log('📋 [WEBHOOK] Offramp created event cached, awaiting partnerUserRef for txId:', txId);
+    }
+
     if (eventPartnerUserRef) {
-      const eventAmount = typeof webhookData.purchaseAmount === 'object'
-        ? webhookData.purchaseAmount?.value
-        : (webhookData.purchaseAmount || webhookData.paymentAmount);
+      // Flush any pending created event for this transaction first (preserves chronological order)
+      if (txId && pendingOfframpCreated.has(txId)) {
+        const pendingEvent = pendingOfframpCreated.get(txId)!;
+        await storeWebhookEvent(eventPartnerUserRef, pendingEvent);
+        pendingOfframpCreated.delete(txId);
+        console.log('📋 [WEBHOOK] Flushed pending created event for txId:', txId);
+      }
       await storeWebhookEvent(eventPartnerUserRef, {
         eventType,
         transactionId: txId || null,
         timestamp: new Date().toISOString(),
         amount: eventAmount,
-        currency: webhookData.purchaseCurrency || webhookData.paymentCurrency,
-        network: webhookData.destinationNetwork || webhookData.purchaseNetwork,
+        currency: eventCurrency,
+        network: eventNetwork,
         failureReason: webhookData.failureReason,
+        rawBody: webhookData,
       });
       console.log('📋 [WEBHOOK] Event stored for user:', eventPartnerUserRef);
     }
