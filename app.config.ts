@@ -31,13 +31,17 @@ const config: ExpoConfig = {
           'com.coinbase.oauth.app-to-app-v3',
           'com.coinbase.oauth.app-to-app-v2',
           'cbpay',
+          // Coinbase retail (consumer) app scheme — required so
+          // Linking.canOpenURL can detect whether it's installed (see
+          // useCoinbaseAppInstalled).
+          'com.coinbase.consumer',
         ]
       },
       // Apple App Attest capability for the app2app device-attestation flow
       // (modules/app-attest → DCAppAttestService). Use 'production' for
       // App Store / TestFlight builds.
       entitlements: {
-        'com.apple.developer.devicecheck.appattest-environment': 'development'
+        'com.apple.developer.devicecheck.appattest-environment': 'production'
       }
     },
 

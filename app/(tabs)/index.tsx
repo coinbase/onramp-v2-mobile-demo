@@ -97,6 +97,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { APIGuestCheckoutWidget, OnrampForm, useApp2App, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
+import { CoinbaseAppStatus } from "../../components/ui/CoinbaseAppStatus";
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
@@ -778,7 +779,8 @@ export default function Index() {
         <Text style={styles.title}>Onramp V2 Demo</Text>
       </View>
 
-      
+      {/* Partner signal: is the Coinbase retail app installed on this device? */}
+      <CoinbaseAppStatus />
 
       {/* Error banner for failed options fetch */}
       {optionsError && !isLoadingOptions && (
