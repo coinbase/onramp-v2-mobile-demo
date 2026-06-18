@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/app2app/(.*)", "destination": "/api/app2app" }
+  ]
+}
