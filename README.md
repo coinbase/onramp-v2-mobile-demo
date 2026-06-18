@@ -183,6 +183,68 @@ ipconfig getifaddr en0
 
 **Push notifications work automatically** via Expo Push Service - no additional setup needed!
 
+## Building for TestFlight / App Store (App2App + App Attest)
+
+> **Heads up:** both `/ios/` and `.env` are **git-ignored**. A fresh clone has
+> neither, so you must (1) create a real `.env` and (2) regenerate the native
+> project with `expo prebuild`. A teammate building "from the repo" with no `.env`
+> is the most common cause of a build that installs but fails sign-in / app2app.
+
+### 1. Create a real `.env` (not the Expo Go defaults)
+
+For a distributable build the app2app device-attestation flow needs all of these,
+and **`EXPO_PUBLIC_USE_EXPO_CRYPTO` must be `false`** (otherwise App Attest uses a
+mock attestation the server rejects):
+
+```bash
+EXPO_PUBLIC_CDP_PROJECT_ID=<your-cdp-project-id>
+EXPO_PUBLIC_ONRAMP_PROJECT_ID=<cdp-project-that-owns-app2app>   # often the same id
+EXPO_PUBLIC_APP_ATTEST_APP_ID=<TEAMID>.<bundleId>              # e.g. ABCDE12345.com.your.bundle
+EXPO_PUBLIC_BASE_URL=https://<your-project>.vercel.app/api      # NOTE the /api suffix for Vercel
+EXPO_PUBLIC_USE_EXPO_CRYPTO=false                              # REQUIRED for native/TestFlight builds
+IOS_BUILD_NUMBER=<n>                                           # bump for every upload; must be unique & increasing
+```
+
+These `EXPO_PUBLIC_*` values are **inlined into the JS bundle at build time**, so
+edit `.env` *before* archiving — changing it later requires a rebuild.
+
+### 2. Generate the native project + pods
+
+```bash
+npx expo prebuild -p ios     # regenerates /ios from app.config.ts
+cd ios && pod install && cd ..
+```
+
+`expo prebuild` derives all native iOS config from `app.config.ts`, including the
+App Attest entitlement (`com.apple.developer.devicecheck.appattest-environment =
+production`), the `LSApplicationQueriesSchemes` (incl. `com.coinbase.consumer`),
+the bundle id, and the build number (from `IOS_BUILD_NUMBER`). It does **not**
+create `.env` or set your Xcode signing team.
+
+### 3. Archive + upload
+
+```bash
+open ios/OnrampV2Demo.xcworkspace
+```
+
+1. Select the **OnrampV2Demo** target → **Signing & Capabilities** → set your
+   **Team** (must match the team id in `EXPO_PUBLIC_APP_ATTEST_APP_ID`).
+2. Set the run destination to **Any iOS Device (arm64)**.
+3. **Product → Archive**.
+4. In the Organizer, **Distribute App → App Store Connect → Upload** (Xcode
+   creates/uses the distribution cert via your account).
+
+### App Attest notes
+
+- App Attest keys are stored in the iOS **keychain**, which **survives app
+  delete/reinstall** for the same bundle id, and a key is bound to its App Attest
+  **environment** (dev sandbox vs production). A key created by a local/dev build
+  can therefore be reused — and rejected at the signature step — by a later
+  TestFlight build on the same device.
+- The app self-heals (resets the key, re-registers, retries once) on a signature
+  error, and the Home screen has a **"Reset device attestation"** button to force
+  a fresh key manually.
+
 ## Using the App
 
 ### First Time Setup
@@ -372,9 +434,13 @@ Check Expo logs:
 
 | Variable | Description |
 |----------|-------------|
-| `EXPO_PUBLIC_CDP_PROJECT_ID` | Your CDP project ID |
-| `EXPO_PUBLIC_BASE_URL` | Backend server URL (public URL for webhooks, or `http://localhost:3000` for local testing) |
-| `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go (`npx expo start`), `false` for dev builds (`npx expo run:ios`) |
+| `EXPO_PUBLIC_CDP_PROJECT_ID` | Your CDP project ID (embedded wallet / sign-in) |
+| `EXPO_PUBLIC_BASE_URL` | Backend server URL. For Vercel it must end in `/api`; for a local server use `http://localhost:3000` |
+| `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go (`npx expo start`); **`false`** for dev/native/TestFlight builds (`npx expo run:ios`, archives). Must be `false` for app2app/App Attest to work |
+| `EXPO_PUBLIC_ONRAMP_PROJECT_ID` | CDP project that owns the app2app onramp integration (attestation + onramp-mobile endpoints). Defaults to `EXPO_PUBLIC_CDP_PROJECT_ID` |
+| `EXPO_PUBLIC_APP_ATTEST_APP_ID` | iOS App Attest App ID in `teamID.bundleID` form; must match the build's signing team + bundle id and be allowlisted in the CDP project (required for app2app) |
+| `EXPO_PUBLIC_APP2APP_VERBOSE` | Optional. `1` enables step-by-step app2app / App Attest debug logs on device |
+| `IOS_BUILD_NUMBER` | iOS build number (`CFBundleVersion`); bump for every TestFlight/App Store upload |
 
 ### Required (Server `.env`)
 
