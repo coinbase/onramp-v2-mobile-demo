@@ -70,15 +70,42 @@ function getNativeModule(): AppAttestNativeModule | null {
   return nativeModule;
 }
 
-const KEY_ID_STORE_KEY = 'app2app.appAttest.keyId';
+// App Attest keys are bound to BOTH the CDP onramp project (the server registers
+// the key per project) AND the Apple App Attest environment (development vs
+// production) selected by the build's entitlement. A key provisioned under one
+// (dev project + dev App Attest env) is meaningless to the other, so stored keys
+// MUST NOT be shared across them: reusing a dev-registered key against prod makes
+// the server skip registration and then reject the per-request assertion.
+//
+// Scope every stored value by the onramp project id (dev and prod use distinct
+// projects, e.g. 46cdfdf1… vs 6d851850…) so each environment provisions,
+// attests, and registers its own key independently on the same device. Switching
+// envs no longer collides — it simply starts a fresh key.
+const STORE_SCOPE = (
+  process.env.EXPO_PUBLIC_ONRAMP_PROJECT_ID ||
+  process.env.EXPO_PUBLIC_CDP_PROJECT_ID ||
+  'default'
+).replace(/[^A-Za-z0-9._-]/g, '');
+
+const KEY_ID_STORE_KEY = `app2app.appAttest.keyId.${STORE_SCOPE}`;
 // Marks that the stored keyId has already been through attestKey() once, so
 // subsequent requests use generateAssertion() instead. Apple RATE-LIMITS
 // attestKey() (once per key lifetime), so we must not re-attest per session.
-const ATTESTED_STORE_KEY = 'app2app.appAttest.attestedKeyId';
+const ATTESTED_STORE_KEY = `app2app.appAttest.attestedKeyId.${STORE_SCOPE}`;
 // Marks that the keyId has been registered with onramp-service (cdp-api PR
 // #1347) — i.e. the server verified the attestation and stored the public key.
 // Set only after the registration endpoint returns success.
-const REGISTERED_STORE_KEY = 'app2app.appAttest.registeredKeyId';
+const REGISTERED_STORE_KEY = `app2app.appAttest.registeredKeyId.${STORE_SCOPE}`;
+
+// Legacy (pre-scoping) store keys. Older builds persisted these fixed names with
+// no environment scope, so a device previously used in dev carries a
+// dev-registered key that a prod build would wrongly treat as already
+// registered. clearLegacyAppAttestKeys() purges them once on app2app entry.
+const LEGACY_STORE_KEYS = [
+  'app2app.appAttest.keyId',
+  'app2app.appAttest.attestedKeyId',
+  'app2app.appAttest.registeredKeyId',
+] as const;
 
 /**
  * Whether the payload is the one-time attestation (key registration) or a
@@ -438,4 +465,17 @@ export async function resetAppAttestKey(): Promise<void> {
   await SecureStore.deleteItemAsync(KEY_ID_STORE_KEY).catch(() => {});
   await SecureStore.deleteItemAsync(ATTESTED_STORE_KEY).catch(() => {});
   await SecureStore.deleteItemAsync(REGISTERED_STORE_KEY).catch(() => {});
+}
+
+/**
+ * Deletes the pre-scoping (un-scoped) App Attest store entries left by older
+ * builds. Without this, a device previously used in another environment (e.g.
+ * dev) would carry a dev-registered key that a prod build wrongly treats as
+ * already registered — skipping registration and then failing the assertion.
+ * Idempotent/no-op once cleared; call once on the app2app entry path.
+ */
+export async function clearLegacyAppAttestKeys(): Promise<void> {
+  await Promise.all(
+    LEGACY_STORE_KEYS.map((k) => SecureStore.deleteItemAsync(k).catch(() => {})),
+  );
 }

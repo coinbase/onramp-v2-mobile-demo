@@ -28,6 +28,7 @@ import { useCallback, useState } from "react";
 import { Platform } from "react-native";
 import {
   attestDeviceKey,
+  clearLegacyAppAttestKeys,
   getAppAttestation,
   isAppAttestSupported,
   isDeviceRegistered,
@@ -82,6 +83,9 @@ const BUNDLE_ID = APP_ATTEST_APP_ID.includes(".")
  */
 async function ensureDeviceRegistered(): Promise<void> {
   if (Platform.OS !== "ios") return;
+  // Purge pre-scoping keys once so a device previously used in another
+  // environment (e.g. dev) doesn't carry a stale registration into this one.
+  await clearLegacyAppAttestKeys();
   if (await isDeviceRegistered()) {
     a2aLog("🔐 [APP2APP] Device key already registered — skipping registration");
     return;
