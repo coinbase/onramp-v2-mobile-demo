@@ -479,3 +479,16 @@ export async function clearLegacyAppAttestKeys(): Promise<void> {
     LEGACY_STORE_KEYS.map((k) => SecureStore.deleteItemAsync(k).catch(() => {})),
   );
 }
+
+/**
+ * Full reset of all App Attest state on this device: the current project-scoped
+ * keyId/attested/registered markers AND the pre-scoping legacy entries. The
+ * stored keyId lives in the iOS keychain, which survives an app delete/reinstall
+ * for the same bundle id — so a key created during local/dev testing can be
+ * reused (and rejected at the assertion step) by a later TestFlight build. Use
+ * this to force a clean attest + registration on the next app2app run.
+ */
+export async function clearAllAppAttestKeys(): Promise<void> {
+  await resetAppAttestKey();
+  await clearLegacyAppAttestKeys();
+}

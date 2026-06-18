@@ -73,6 +73,18 @@ const BUNDLE_ID = APP_ATTEST_APP_ID.includes(".")
   : APP_ATTEST_APP_ID;
 
 /**
+ * Heuristic: does this error look like the server rejecting the device key /
+ * its assertion (signature)? Used to decide whether to reset the key and retry.
+ * Matches attestation/assertion/signature wording and "not registered" cases.
+ */
+function isAttestationKeyError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+  return /attest|assert|signature|invalid.*key|device.*key|not.*regist|unregist|public key/.test(
+    msg,
+  );
+}
+
+/**
  * One-time, per-install iOS App Attest device-key registration (cdp-api
  * PR #1347). No-op on Android (Play Integrity is validated inline per request)
  * and when the device key is already registered. On the simulator / Expo Go the
@@ -146,12 +158,6 @@ export function useApp2App() {
           a2aWarn('⚠️ [APP2APP] Hardware attestation unavailable — using stub attestation');
         }
 
-        // 0. One-time per-install device-key registration (iOS App Attest).
-        //    Must precede the session so the device's public key is on file for
-        //    the per-transaction assertion check.
-        await ensureDeviceRegistered();
-
-        // 1. Create the challenge + bind the transaction params server-side.
         const order: App2AppOrderParams = {
           projectId: ONRAMP_PROJECT_ID,
           appId: APP_ATTEST_APP_ID,
@@ -163,24 +169,48 @@ export function useApp2App() {
           partnerUserRef,
           redirectUrl: REDIRECT_URL,
         };
-        const { challenge } = await createOnrampMobileChallenge(order);
 
-        // 2. Per-transaction assertion bound to SHA-256(base64url_decode(challenge))
-        //    (signed with the now-registered key).
-        const attestation = await getAppAttestation(challenge);
+        // Steps 1–4: challenge → per-transaction assertion → session → hand-off.
+        const runHandoff = async (): Promise<boolean> => {
+          // 1. Create the challenge + bind the transaction params server-side.
+          const { challenge } = await createOnrampMobileChallenge(order);
+          // 2. Per-transaction assertion bound to
+          //    SHA-256(base64url_decode(challenge)), signed with the registered key.
+          const attestation = await getAppAttestation(challenge);
+          // 3. Verify the attestation → onramp session (the id for the deep link).
+          const session = await createOnrampMobileSession({ challenge, attestation });
+          // 4. Hand off to the Coinbase retail app via the onramp universal link.
+          return await openCoinbaseApp2App(session, {
+            address: params.destinationAddress,
+            asset: params.purchaseCurrency,
+            presetFiatAmount: params.paymentAmount,
+            defaultNetwork: params.destinationNetwork,
+            redirectUrl: REDIRECT_URL,
+          });
+        };
 
-        // 3. Verify the attestation → onramp session (the id for the deep link).
-        const session = await createOnrampMobileSession({ challenge, attestation });
+        // 0. One-time per-install device-key registration (iOS App Attest).
+        //    Must precede the session so the device's public key is on file for
+        //    the per-transaction assertion check.
+        await ensureDeviceRegistered();
 
-        // 4. Hand off to the Coinbase retail app via the onramp universal link,
-        //    carrying the verified session token + the order details.
-        return await openCoinbaseApp2App(session, {
-          address: params.destinationAddress,
-          asset: params.purchaseCurrency,
-          presetFiatAmount: params.paymentAmount,
-          defaultNetwork: params.destinationNetwork,
-          redirectUrl: REDIRECT_URL,
-        });
+        try {
+          return await runHandoff();
+        } catch (err) {
+          // Self-heal: a key left over from earlier (e.g. dev/local) testing can
+          // be reused but rejected at the assertion step (signature/attestation
+          // error). Drop it, re-register a fresh key, and retry the hand-off once.
+          if (Platform.OS === "ios" && isAttestationKeyError(err)) {
+            a2aWarn(
+              "🔁 [APP2APP] Assertion rejected — resetting App Attest key and retrying once",
+            );
+            await resetAppAttestKey();
+            await clearLegacyAppAttestKeys();
+            await ensureDeviceRegistered();
+            return await runHandoff();
+          }
+          throw err;
+        }
       } catch (e: any) {
         console.error('❌ [APP2APP] Flow failed:', e);
         setError(e?.message || 'App-to-app onramp failed');
