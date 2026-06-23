@@ -285,19 +285,27 @@ export const getCurrentNetwork = () => currentNetwork;
  * - EVM networks: EVM wallet only
  * - Unsupported networks: null (no address)
  */
+// Address-shape guards so a manual address typed for one chain isn't reused on
+// another (e.g. a 0x… EVM address must never be sent for a Solana onramp).
+const isEvmAddress = (addr: string | null): boolean => !!addr && /^0x[0-9a-fA-F]{40}$/.test(addr);
+const isSolanaAddress = (addr: string | null): boolean =>
+  !!addr && addr.length >= 32 && addr.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(addr);
+
 export const getCurrentWalletAddress = () => {
   const networkLower = (currentNetwork || '').toLowerCase();
   const isSolanaNetwork = ['solana', 'sol'].some(k => networkLower.includes(k));
   const isEvmNetwork = ['ethereum', 'base', 'unichain', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'avax', 'bsc', 'fantom', 'linea', 'zksync', 'scroll'].some(k => networkLower.includes(k));
 
   if (sandboxMode) {
-    // Sandbox mode: allow testing with any address
+    // Sandbox mode: allow testing with a manual address, but only when its shape
+    // matches the selected network — otherwise fall back to the network wallet so
+    // we never send an EVM address to Solana (or vice versa).
     if (isSolanaNetwork) {
-      // SOL network: prefer manual, fallback to SOL wallet
-      return manualWalletAddress || currentSolanaAddress || null;
+      // SOL network: manual (only if it's a valid Solana address) > SOL wallet
+      return (isSolanaAddress(manualWalletAddress) ? manualWalletAddress : null) || currentSolanaAddress || null;
     } else {
-      // EVM and ANY other network (including unsupported): prefer manual, fallback to EVM wallet
-      return manualWalletAddress || currentWalletAddress || null;
+      // EVM and ANY other network: manual (only if it's a valid EVM address) > EVM wallet
+      return (isEvmAddress(manualWalletAddress) ? manualWalletAddress : null) || currentWalletAddress || null;
     }
   } else {
     // Production mode: strict network-wallet matching

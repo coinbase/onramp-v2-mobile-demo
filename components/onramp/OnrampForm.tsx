@@ -226,9 +226,12 @@ const usSubs = useMemo(() => {
     if (prevNetworkRef.current === network) return;
     prevNetworkRef.current = network;
 
-    if (!localSandboxEnabled && (isEvmNetwork || isSolanaNetwork)) {
-      // Only update address for supported networks (EVM/Solana) in production mode
-      // For unsupported networks (Noble, etc.), don't auto-update
+    if (isEvmNetwork || isSolanaNetwork) {
+      // Refresh the address for supported networks (EVM/Solana) in BOTH sandbox and
+      // production. getCurrentWalletAddress() is network-aware (and shape-checks any
+      // manual address), so switching to Solana swaps in the Solana address instead
+      // of keeping the previous EVM address. Unsupported networks (Noble, etc.) are
+      // intentionally left alone. The null guard avoids clobbering a valid address.
       const { getCurrentWalletAddress } = require('../../utils/sharedState');
       const newAddress = getCurrentWalletAddress();
       if (newAddress && newAddress !== address) {
