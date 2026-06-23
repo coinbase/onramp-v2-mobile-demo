@@ -55,7 +55,24 @@ export interface StartApp2AppParams {
   paymentCurrency: string;      // e.g. "USD"
 }
 
-const REDIRECT_URL = "onrampdemo://onramp-return";
+// Return target the Coinbase app redirects to when the onramp completes.
+// Prefer an https Universal Link on the same origin as the API (strip the /api
+// suffix) so iOS opens this app via the AASA association
+// (server/api/aasa.js + ios.associatedDomains). Falls back to the custom scheme
+// for local/non-https backends, where Universal Links don't apply.
+function computeRedirectUrl(): string {
+  const base = process.env.EXPO_PUBLIC_BASE_URL || "";
+  try {
+    const u = new URL(base);
+    if (u.protocol === "https:") {
+      return `${u.protocol}//${u.host}/onramp-return`;
+    }
+  } catch {
+    // fall through to the custom scheme
+  }
+  return "onrampdemo://onramp-return";
+}
+const REDIRECT_URL = computeRedirectUrl();
 // App Attest App ID in `teamID.bundleID` form. Configure via env — never hardcode
 // a real team/bundle id in source (see .env.example: EXPO_PUBLIC_APP_ATTEST_APP_ID).
 const APP_ATTEST_APP_ID = process.env.EXPO_PUBLIC_APP_ATTEST_APP_ID || "";

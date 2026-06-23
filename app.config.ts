@@ -42,7 +42,12 @@ const config: ExpoConfig = {
       // App Store / TestFlight builds.
       entitlements: {
         'com.apple.developer.devicecheck.appattest-environment': 'production'
-      }
+      },
+      // iOS Universal Links: lets https://<host>/onramp-return (and other
+      // allowlisted paths) open this app directly. The host must serve the AASA
+      // file at /.well-known/apple-app-site-association (see server/api/aasa.js).
+      // No protocol prefix here — Apple expects just `applinks:<host>`.
+      associatedDomains: ['applinks:onramp-v2-mobile-demo-murex.vercel.app']
     },
 
     android: {
