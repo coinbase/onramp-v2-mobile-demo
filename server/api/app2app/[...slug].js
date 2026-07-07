@@ -5,8 +5,8 @@ import app from '../../src/app.js';
  *
  * The app2app onramp routes are defined on the shared Express app
  * (see server/src/app.ts): /app2app/mobile/challenges, /sessions, and the
- * /app2app/mobile/attestation/{challenges,registrations} device-attestation
- * endpoints. Vercel's file-based routing only exposes files under api/, so this
+ * /app2app/mobile/projects/{projectId}/attestation/{challenges,registrations/{keyId}}
+ * device-attestation endpoints. Vercel's file-based routing only exposes files under api/, so this
  * single catch-all forwards all of them to the Express app rather than adding a
  * separate function file per route.
  *

@@ -106,7 +106,7 @@ export interface IosAttestationPayload {
  */
 export interface OnrampAttestationRegistration {
   /** The matched `teamID.bundleID` allowlist entry the device registered under. */
-  identifier: string;
+  appId: string;
   /** The registered App Attest key id — reused for subsequent assertions. */
   keyId: string;
   /** Always "ios" — registration is iOS-only. */
@@ -175,11 +175,15 @@ export async function createOnrampMobileChallenge(
  *   2. attestDeviceKey(challenge)         (see utils/appAttest.ts)
  *        → CBOR attestation object over SHA-256(challenge)
  *   3. registerOnrampAttestation({ projectId, challenge, ios })
- *        → { identifier, keyId, … } — device public key now stored upstream
+ *        → { appId, keyId, … } — device public key now stored upstream
  *
- * Both endpoints are public/unauthenticated and reached via the server proxy:
- *   POST /app2app/mobile/attestation/challenges    → …/v2/onramp/mobile/attestation/challenges
- *   POST /app2app/mobile/attestation/registrations → …/v2/onramp/mobile/attestation/registrations
+ * Both endpoints are public/unauthenticated and reached via the server proxy.
+ * Per onramp-service PR #1840 (cdp-api v1.41.0 strict handlers), projectId and
+ * keyId are PATH parameters, and registration is a PUT keyed on keyId:
+ *   POST /app2app/mobile/projects/{projectId}/attestation/challenges
+ *        → …/v2/onramp/mobile/projects/{projectId}/attestation/challenges
+ *   PUT  /app2app/mobile/projects/{projectId}/attestation/registrations/{keyId}
+ *        → …/v2/onramp/mobile/projects/{projectId}/attestation/registrations/{keyId}
  * ============================================================================
  */
 
@@ -193,11 +197,14 @@ export async function createOnrampAttestationChallenge(
 ): Promise<App2AppChallenge> {
   a2aLog('📤 [APP2APP] createOnrampAttestationChallenge', { projectId });
 
-  const res = await fetch(`${BASE_URL}/app2app/mobile/attestation/challenges`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ projectId }),
-  });
+  // projectId is a path parameter (uuid-validated upstream); no request body.
+  const res = await fetch(
+    `${BASE_URL}/app2app/mobile/projects/${encodeURIComponent(projectId)}/attestation/challenges`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    },
+  );
 
   a2aLog('📥 [APP2APP] attestation challenge status:', res.status, res.statusText);
 
@@ -214,8 +221,12 @@ export async function createOnrampAttestationChallenge(
 
 /**
  * Registration step 2 — verify the Apple attestation and register the device's
- * public key. iOS-only. Returns the matched allowlist `identifier` and the
+ * public key. iOS-only. Returns the matched allowlist `appId` and the
  * registered `keyId` to reuse for subsequent assertions.
+ *
+ * Per onramp-service PR #1840, this is a PUT with `projectId` and `keyId` as
+ * path parameters; the body carries only the challenge and the attestation
+ * material (`attestation`, `bundleId`).
  */
 export async function registerOnrampAttestation(args: {
   projectId: string;
@@ -223,18 +234,25 @@ export async function registerOnrampAttestation(args: {
   ios: IosAttestationPayload;
 }): Promise<OnrampAttestationRegistration> {
   const { projectId, challenge, ios } = args;
+  const { keyId, attestation, bundleId } = ios;
 
   a2aLog('📤 [APP2APP] registerOnrampAttestation', {
     projectId,
-    keyId: ios.keyId?.slice(0, 8),
-    bundleId: ios.bundleId,
+    keyId: keyId?.slice(0, 8),
+    bundleId,
   });
 
-  const res = await fetch(`${BASE_URL}/app2app/mobile/attestation/registrations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ projectId, challenge, ios }),
-  });
+  // keyId is the authoritative device-key id in the path; it is also included in
+  // the body's `ios` payload to match the cdp-api IosAttestationPayload schema
+  // (attestation, bundleId, keyId) that the generated SDK sends.
+  const res = await fetch(
+    `${BASE_URL}/app2app/mobile/projects/${encodeURIComponent(projectId)}/attestation/registrations/${encodeURIComponent(keyId)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge, ios: { keyId, attestation, bundleId } }),
+    },
+  );
 
   a2aLog('📥 [APP2APP] attestation registration status:', res.status, res.statusText);
 
@@ -243,10 +261,10 @@ export async function registerOnrampAttestation(args: {
   }
 
   const data = await res.json();
-  if (!data?.identifier || !data?.keyId) {
+  if (!data?.appId || !data?.keyId) {
     throw new Error(`Unexpected registration response: ${JSON.stringify(data)}`);
   }
-  a2aLog('✅ [APP2APP] device registered:', data.identifier);
+  a2aLog('✅ [APP2APP] device registered:', data.appId);
   return data as OnrampAttestationRegistration;
 }
 

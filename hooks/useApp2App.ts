@@ -56,11 +56,20 @@ export interface StartApp2AppParams {
 }
 
 // Return target the Coinbase app redirects to when the onramp completes.
-// Prefer an https Universal Link on the same origin as the API (strip the /api
-// suffix) so iOS opens this app via the AASA association
-// (server/api/aasa.js + ios.associatedDomains). Falls back to the custom scheme
-// for local/non-https backends, where Universal Links don't apply.
+//
+// This must be (a) a host in the CDP project's redirect domain allowlist and
+// (b) a domain whose AASA points back at this app (ios.associatedDomains) so the
+// Universal Link reopens us. That is the stable public app domain, which is NOT
+// necessarily the API base: when API traffic is proxied elsewhere for debugging
+// (e.g. a Cloudflare tunnel to the local server), the redirect must still use the
+// allowlisted app domain. Resolution order:
+//   1. EXPO_PUBLIC_APP2APP_REDIRECT_URL — explicit override (use when the API base
+//      is a tunnel/non-allowlisted host).
+//   2. https origin of EXPO_PUBLIC_BASE_URL — when the API base IS the app domain.
+//   3. custom scheme — local/non-https backends where Universal Links don't apply.
 function computeRedirectUrl(): string {
+  const override = process.env.EXPO_PUBLIC_APP2APP_REDIRECT_URL;
+  if (override) return override;
   const base = process.env.EXPO_PUBLIC_BASE_URL || "";
   try {
     const u = new URL(base);

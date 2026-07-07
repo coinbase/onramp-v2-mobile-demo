@@ -378,6 +378,7 @@ async function proxyOnrampMobile(
   body: unknown,
   extraHeaders: Record<string, string>,
   res: import('express').Response,
+  method: 'POST' | 'PUT' = 'POST',
 ): Promise<void> {
   const startedAt = Date.now();
 
@@ -396,7 +397,7 @@ async function proxyOnrampMobile(
       const token = await generateJwt({
         apiKeyId: process.env.CDP_API_KEY_ID,
         apiKeySecret: process.env.CDP_API_KEY_SECRET,
-        requestMethod: 'POST',
+        requestMethod: method,
         requestHost: u.hostname,
         requestPath: u.pathname, // no query string — CDP signs pathname only
         expiresIn: 120,
@@ -408,18 +409,28 @@ async function proxyOnrampMobile(
     }
   }
 
+  // Some endpoints (e.g. the attestation challenge, whose params are all in the
+  // path) take no request body; skip serializing one so we don't send `{}`.
+  const hasBody = body !== undefined && body !== null;
+
   if (APP2APP_VERBOSE) {
     console.log(`\n┌─ [APP2APP] ${label} ▶ REQUEST ────────────────────────────────`);
-    console.log(`│ POST ${upstreamUrl}  (jwt=${jwtAttached})`);
-    console.log(`│ body: ${JSON.stringify(body ?? {}, null, 2).replace(/\n/g, '\n│ ')}`);
+    console.log(`│ ${method} ${upstreamUrl}  (jwt=${jwtAttached})`);
+    if (hasBody) {
+      console.log(`│ body: ${JSON.stringify(body, null, 2).replace(/\n/g, '\n│ ')}`);
+    }
     console.log(`└──────────────────────────────────────────────────────────────`);
   }
 
-  const upstream = await fetch(upstreamUrl, {
-    method: 'POST',
+  const requestInit: RequestInit = {
+    method,
     headers: { 'Content-Type': 'application/json', ...authHeaders, ...extraHeaders },
-    body: JSON.stringify(body ?? {}),
-  });
+  };
+  if (hasBody) {
+    requestInit.body = JSON.stringify(body);
+  }
+
+  const upstream = await fetch(upstreamUrl, requestInit);
 
   const text = await upstream.text();
   let data: unknown;
@@ -483,29 +494,32 @@ app.post('/app2app/mobile/sessions', async (req, res) => {
 });
 
 /**
- * One-time iOS App Attest device-key REGISTRATION (cdp-api PR #1347,
- * c3/cdp-api → /v2/onramp/mobile/attestation/*). iOS-only; Android validates
+ * One-time iOS App Attest device-key REGISTRATION (c3/cdp-api → /v2/onramp/
+ * mobile/projects/{projectId}/attestation/*). iOS-only; Android validates
  * Play Integrity inline per request and has no registration step.
  *
- *   A. POST /app2app/mobile/attestation/challenges    → { challenge, expiresAt }
- *        Issues a one-time registration challenge for this project.
- *   B. POST /app2app/mobile/attestation/registrations → { identifier, keyId, … }
- *        Verifies the Apple attestation object signed over SHA-256(challenge)
- *        and stores the device public key for later assertion checks.
+ *   A. POST /app2app/mobile/projects/:projectId/attestation/challenges
+ *        → { challenge, expiresAt }  — one-time registration challenge.
+ *   B. PUT  /app2app/mobile/projects/:projectId/attestation/registrations/:keyId
+ *        → { appId, keyId, … }  — verifies the Apple attestation object signed
+ *        over SHA-256(challenge) and stores the device public key.
  *
- * Both are public/unauthenticated (trust comes from the attestation itself), so
- * we forward without a CDP JWT, mirroring the challenge/session proxies above.
+ * Per onramp-service PR #1840 (cdp-api v1.41.0 strict handlers), projectId and
+ * keyId are path parameters (projectId uuid-validated upstream) and registration
+ * is a PUT keyed on keyId. Both are public/unauthenticated (trust comes from the
+ * attestation itself), so we forward without a CDP JWT.
  */
 
-// Step A — issue a one-time iOS App Attest registration challenge.
-app.post('/app2app/mobile/attestation/challenges', async (req, res) => {
+// Step A — issue a one-time iOS App Attest registration challenge. projectId is
+// a path param; the upstream endpoint takes no request body.
+app.post('/app2app/mobile/projects/:projectId/attestation/challenges', async (req, res) => {
   try {
-    const body = req.body ?? {};
+    const { projectId } = req.params;
 
     await proxyOnrampMobile(
       'createOnrampAttestationChallenge',
-      `${onrampMobileBase()}/attestation/challenges`,
-      body,
+      `${onrampMobileBase()}/projects/${encodeURIComponent(projectId)}/attestation/challenges`,
+      undefined,
       {},
       res,
     );
@@ -516,22 +530,28 @@ app.post('/app2app/mobile/attestation/challenges', async (req, res) => {
 });
 
 // Step B — verify the attestation object & register the device public key.
-app.post('/app2app/mobile/attestation/registrations', async (req, res) => {
-  try {
-    const body = req.body ?? {};
+// projectId and keyId are path params; the body carries { challenge, ios }.
+app.put(
+  '/app2app/mobile/projects/:projectId/attestation/registrations/:keyId',
+  async (req, res) => {
+    try {
+      const { projectId, keyId } = req.params;
+      const body = req.body ?? {};
 
-    await proxyOnrampMobile(
-      'registerOnrampAttestation',
-      `${onrampMobileBase()}/attestation/registrations`,
-      body,
-      {},
-      res,
-    );
-  } catch (error) {
-    console.error('❌ [APP2APP] attestation registration proxy error:', error);
-    res.status(502).json({ errorMessage: 'Failed to reach onramp attestation registration API' });
-  }
-});
+      await proxyOnrampMobile(
+        'registerOnrampAttestation',
+        `${onrampMobileBase()}/projects/${encodeURIComponent(projectId)}/attestation/registrations/${encodeURIComponent(keyId)}`,
+        body,
+        {},
+        res,
+        'PUT',
+      );
+    } catch (error) {
+      console.error('❌ [APP2APP] attestation registration proxy error:', error);
+      res.status(502).json({ errorMessage: 'Failed to reach onramp attestation registration API' });
+    }
+  },
+);
 
 // Zod schema for EVM balance query validation (SSRF protection)
 const evmBalanceQuerySchema = z.object({
