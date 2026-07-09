@@ -1,38 +1,34 @@
 /**
  * ============================================================================
- * useCoinbaseAppInstalled — COINBASE RETAIL APP DETECTION
+ * useCoinbaseAppInstalled — CDP ONRAMP APP-TO-APP AVAILABILITY DETECTION
  * ============================================================================
  *
- * Detects whether the Coinbase retail (consumer) app is installed by probing
- * its registered URL scheme with Linking.canOpenURL. Partners (e.g. Phantom)
- * can branch their UX on this — app-to-app hand-off when installed, web/Widget
- * fallback when not.
+ * Detects whether the installed Coinbase app supports the CDP onramp
+ * app-to-app handoff by probing the `com.coinbase.cdp.onramp://` scheme
+ * (via `canOpenCoinbaseOnramp` from @coinbase/cdp-react-native).
  *
- * iOS REQUIREMENT: the probed scheme MUST be declared under
- * `LSApplicationQueriesSchemes` in the app's Info.plist (see app.config.ts and
- * ios/OnrampV2Demo/Info.plist). Without it, canOpenURL always resolves `false`
- * on iOS regardless of whether the app is installed.
+ * This is more precise than probing `com.coinbase.consumer://` — the CDP
+ * onramp scheme is only registered by Coinbase app versions that correctly
+ * handle the CDP session token. Older versions silently show an error screen.
  *
- * The check re-runs whenever the app returns to the foreground, so the UI stays
- * accurate if the user installs/removes Coinbase while this app is backgrounded.
+ * iOS requirement: `com.coinbase.cdp.onramp` must be listed under
+ * `LSApplicationQueriesSchemes` in the app's Info.plist (see app.config.ts).
+ *
+ * The check re-runs whenever the app returns to the foreground so the UI
+ * stays accurate if the user installs/removes Coinbase while backgrounded.
  * ============================================================================
  */
 
+import { canOpenCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { AppState, Linking } from "react-native";
-
-/**
- * URL scheme registered by the Coinbase retail app. Probing it tells us whether
- * the retail app is installed on the device.
- */
-export const COINBASE_RETAIL_SCHEME = "com.coinbase.consumer://";
+import { AppState } from "react-native";
 
 export type CoinbaseAppInstallState = "unknown" | "installed" | "not-installed";
 
 export interface UseCoinbaseAppInstalledResult {
   /** Raw detection state; "unknown" until the first probe resolves. */
   state: CoinbaseAppInstallState;
-  /** Convenience boolean — true only once the app is confirmed installed. */
+  /** Convenience boolean — true only once the app is confirmed to support CDP onramp. */
   isInstalled: boolean;
   /** Re-run the detection on demand. */
   refresh: () => Promise<void>;
@@ -43,10 +39,9 @@ export function useCoinbaseAppInstalled(): UseCoinbaseAppInstalledResult {
 
   const check = useCallback(async () => {
     try {
-      const installed = await Linking.canOpenURL(COINBASE_RETAIL_SCHEME);
-      setState(installed ? "installed" : "not-installed");
+      const available = await canOpenCoinbaseOnramp();
+      setState(available ? "installed" : "not-installed");
     } catch {
-      // canOpenURL can throw if the scheme isn't whitelisted; treat as absent.
       setState("not-installed");
     }
   }, []);

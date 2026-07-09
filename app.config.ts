@@ -23,22 +23,22 @@ const config: ExpoConfig = {
         // server / Metro on the Mac's LAN IP — and requests hang forever.
         NSLocalNetworkUsageDescription:
           'Allow this demo to reach the local development API server on your network.',
-        // Allow Linking.canOpenURL to probe the Coinbase retail app for the
-        // app2app hand-off. Without this, canOpenURL returns false on iOS even
-        // when the Coinbase app is installed. These are the Coinbase app's
-        // registered app-to-app URL schemes (see its CFBundleURLSchemes).
+        // Allow Linking.canOpenURL to probe Coinbase app URL schemes.
+        // Without these declarations, canOpenURL always returns false on iOS 9+
+        // regardless of whether the Coinbase app is installed.
         LSApplicationQueriesSchemes: [
+          // CDP onramp app-to-app scheme — registered only by Coinbase app
+          // versions that correctly handle CDP session tokens. Used by
+          // canOpenCoinbaseOnramp() from @coinbase/cdp-react-native.
+          'com.coinbase.cdp.onramp',
           'com.coinbase.oauth.app-to-app-v3',
           'com.coinbase.oauth.app-to-app-v2',
           'cbpay',
-          // Coinbase retail (consumer) app scheme — required so
-          // Linking.canOpenURL can detect whether it's installed (see
-          // useCoinbaseAppInstalled).
           'com.coinbase.consumer',
         ]
       },
-      // Apple App Attest capability for the app2app device-attestation flow
-      // (modules/app-attest → DCAppAttestService). Use 'production' for
+      // Apple App Attest capability for the app-to-app onramp flow
+      // (@coinbase/cdp-app-attest → DCAppAttestService). Use 'production' for
       // App Store / TestFlight builds.
       entitlements: {
         'com.apple.developer.devicecheck.appattest-environment': 'production'

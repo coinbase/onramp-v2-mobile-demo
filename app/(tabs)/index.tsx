@@ -538,24 +538,17 @@ export default function Index() {
 
       // App-to-app: device-attested hand-off to the Coinbase retail app via the
       // https://coinbase.com/onramp universal link. No phone/email verification —
-      // the iOS App Attest / Android Play Integrity attestation is the trust
-      // anchor (see useApp2App).
+      // the iOS App Attest attestation is the trust anchor (see useApp2App).
+      // The SDK opens the Coinbase app when installed; otherwise falls back to
+      // the web onramp gracefully. Any error propagates to the catch block below.
       if ((formData.paymentMethod || '').toUpperCase() === 'APP2APP_COINBASE') {
-        const opened = await startApp2App({
+        await startApp2App({
           purchaseCurrency: assetApiName,
           destinationNetwork: networkApiName,
           destinationAddress: targetAddress,
           paymentAmount: updatedFormData.amount,
           paymentCurrency: updatedFormData.paymentCurrency || 'USD',
         });
-        if (!opened) {
-          setApplePayAlert({
-            visible: true,
-            title: 'Coinbase app not found',
-            message: 'We could not open the Coinbase app for the app-to-app hand-off. Install or update Coinbase and try again.',
-            type: 'info',
-          });
-        }
         setIsProcessingPayment(false);
         return; // do not call createOrder()
       }

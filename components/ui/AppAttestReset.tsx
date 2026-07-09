@@ -13,10 +13,10 @@
  * ============================================================================
  */
 
+import { clearOnrampAttestation } from "@coinbase/cdp-app-attest";
 import React, { useState } from "react";
 import { Alert, Platform, Pressable, StyleSheet, Text } from "react-native";
 import { COLORS } from "../../constants/Colors";
-import { clearAllAppAttestKeys } from "../../utils/appAttest";
 
 const { TEXT_SECONDARY, BORDER } = COLORS;
 
@@ -37,7 +37,7 @@ export function AppAttestReset() {
           onPress: async () => {
             setBusy(true);
             try {
-              await clearAllAppAttestKeys();
+              await clearOnrampAttestation();
               Alert.alert(
                 "Attestation cleared",
                 "A fresh key will be created on your next app-to-app attempt.",
