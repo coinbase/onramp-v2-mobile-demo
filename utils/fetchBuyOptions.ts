@@ -3,19 +3,11 @@ import { authenticatedFetch } from "./authenticatedFetch";
 
 export async function fetchBuyOptions(payload: any) {
   try {
-    // Build query parameters using spread
     const params = new URLSearchParams(payload);
-    const fullUrl = `https://api.developer.coinbase.com/onramp/v1/buy/options?${params.toString()}`;
+    const url = `${BASE_URL}/onramp/options?${params.toString()}`;
 
-    const response = await authenticatedFetch(`${BASE_URL}/server/api`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        url: fullUrl,
-        method: "GET",
-      })
+    const response = await authenticatedFetch(url, {
+      method: "GET",
     });
     // Log response early (without consuming it)
     const responseClone = response.clone();

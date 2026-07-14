@@ -154,148 +154,222 @@ app.use((req, res, next) => {
   return validateAccessToken(req, res, next);
 });
 
+// ============================================================================
+// CDP API HELPER
+// ============================================================================
+
 /**
- * Generic proxy server for Coinbase API calls:
- * - Handles JWT authentication and forwards requests to avoid CORS issues
- * - JWT generation requires server-side CDP secrets
- * - Centralizes authentication logic
- *
- * Usage: POST /server/api with { url, method, body }
- * Usage Pattern: Frontend → POST /server/api → Coinbase API → Response
- *
- * Automatically handles:
- * - JWT generation for api.developer.coinbase.com
- * - Method switching (GET for options, POST for orders)
- * - Error forwarding with proper status codes
- *
- * Note: Authentication handled by global middleware above
+ * Signs a request with a server-side CDP JWT and forwards it to the upstream
+ * Coinbase API. The JWT covers only the pathname — Coinbase rejects JWTs that
+ * include query parameters in the signed path.
  */
+async function cdpFetch(
+  url: string,
+  method: 'GET' | 'POST',
+  body?: unknown
+): Promise<Response> {
+  const urlObj = new URL(url);
+  const jwt = await generateJwt({
+    apiKeyId: process.env.CDP_API_KEY_ID!,
+    apiKeySecret: process.env.CDP_API_KEY_SECRET!,
+    requestMethod: method,
+    requestHost: urlObj.hostname,
+    requestPath: urlObj.pathname,
+    expiresIn: 120,
+  });
 
-app.post("/server/api", async (req, res) => {
+  return fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${jwt}`,
+    },
+    ...(method === 'POST' && body != null ? { body: JSON.stringify(body) } : {}),
+  });
+}
 
+/**
+ * Mirrors an upstream CDP response (status + JSON body) back to the Express
+ * response. Non-JSON bodies are wrapped as `{ error: "<text>" }`.
+ */
+async function forwardCdpResponse(
+  upstream: Response,
+  res: import('express').Response
+): Promise<void> {
+  const ct = upstream.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
+  } else {
+    const text = await upstream.text();
+    res.status(upstream.status).json({ error: text || 'Upstream API error' });
+  }
+}
+
+// ============================================================================
+// NAMED CDP PROXY ROUTES  (replace the former open /server/api proxy)
+// ============================================================================
+// Each route is scoped to exactly one upstream endpoint. User-identifying
+// fields (userId, partnerUserRef) are derived from the validated access token
+// stored in req.userId — never trusted from the client.
+// ============================================================================
+
+/**
+ * GET /onramp/transactions
+ * Fetch the authenticated user's onramp (buy) transaction history.
+ * Query params: pageSize (default 10), pageKey (pagination cursor)
+ */
+app.get('/onramp/transactions', async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const { pageSize = '10', pageKey } = req.query as Record<string, string>;
+
+    let url = `https://api.developer.coinbase.com/onramp/v1/buy/user/${encodeURIComponent(userId)}/transactions?pageSize=${encodeURIComponent(pageSize)}`;
+    if (pageKey) url += `&pageKey=${encodeURIComponent(pageKey)}`;
+
+    const upstream = await cdpFetch(url, 'GET');
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [ONRAMP TX] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch onramp transactions' });
+  }
+});
+
+/**
+ * GET /offramp/transactions
+ * Fetch the authenticated user's offramp (sell) transaction history.
+ * Query param: sandbox=true appends the "sandbox-" prefix to the partnerUserRef.
+ */
+app.get('/offramp/transactions', async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const { sandbox } = req.query as Record<string, string>;
+    const partnerUserRef = sandbox === 'true' ? `sandbox-${userId}` : userId;
+
+    const url = `https://api.developer.coinbase.com/onramp/v1/sell/user/${encodeURIComponent(partnerUserRef)}/transactions`;
+    const upstream = await cdpFetch(url, 'GET');
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [OFFRAMP TX] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch offramp transactions' });
+  }
+});
+
+/**
+ * POST /onramp/session
+ * Create a Coinbase Widget onramp session for the authenticated user.
+ * Body: { purchaseCurrency, destinationNetwork, destinationAddress,
+ *         paymentAmount, paymentCurrency, country, subdivision, redirectUrl }
+ */
+app.post('/onramp/session', async (req, res) => {
   try {
     const clientIp = await resolveClientIp(req);
+    const url = `${resolveCdpApiBase()}/v2/onramp/sessions`;
+    const body = { ...req.body, clientIp };
 
-    // Validate the request structure
-    const requestSchema = z.object({
-      url: z.string(), // Must be a valid URL
-      method: z.enum(['GET', 'POST']).optional(),
-      body: z.any().optional(), // Any JSON body
-      headers: z.record(z.string(), z.string()).optional() // Optional additional headers
-    });
-
-    const parsed = requestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.flatten() });
-    }
-
-    const { url: targetUrl, method: method, body: targetBody, headers: additionalHeaders } = parsed.data;
-
-    console.log('📤 [SERVER] Outgoing request:', {
-      url: targetUrl,
-      method: method || 'POST',
-      body: targetBody
-    });
-    if (targetUrl.includes('/onramp/orders')) {
-      console.log('📌 [SERVER] Onramp order request — isQuote:', targetBody?.isQuote);
-    }
-
-
-    // Generate JWT for Coinbase API calls (if needed)
-    const urlObj = new URL(targetUrl);
-    let authToken = null;
-
-    const isOnrampRequest = targetUrl.includes('/onramp/');
-
-    // Add clientIp to onramp requests
-    let finalBody = isOnrampRequest ? { ...targetBody, clientIp } : targetBody;
-    let finalUrl = targetUrl;
-
-    // Log if this is a test account (for debugging)
-    const isTestFlight = (req as any).userData?.testAccount === true;
-    if (isTestFlight) {
-      console.log('🧪 [SERVER] TestFlight account detected');
-    }
-    
-    // Auto-generate JWT for Coinbase API calls only
-    // Use finalUrl for JWT generation, but DON'T include query params in JWT signature
-    // Coinbase API expects JWT to only sign the pathname, not query string
-    const finalUrlObj = new URL(finalUrl);
-    if (finalUrlObj.hostname === "api.developer.coinbase.com" || finalUrlObj.hostname === "api.cdp.coinbase.com") {
-      authToken = await generateJwt({
-        apiKeyId: process.env.CDP_API_KEY_ID!,
-        apiKeySecret: process.env.CDP_API_KEY_SECRET!,
-        requestMethod: method || 'POST',
-        requestHost: finalUrlObj.hostname,
-        requestPath: finalUrlObj.pathname, // DO NOT include .search (query params) - Coinbase rejects it
-        expiresIn: 120
-      });
-    }
-
-    // Build headers
-    const headers = {
-      ...(method === 'POST' && { "Content-Type": "application/json" }),
-      ...(authToken && { "Authorization": `Bearer ${authToken}` }),
-      ...(additionalHeaders || {}) // Merge client-provided headers
-    };
-
-    console.log('📌 [SERVER] Fetching final URL:', finalUrl);
-    // Forward request with authentication
-    const response = await fetch(finalUrl, {
-      method: method || 'POST',
-      headers: headers,
-      ...(method === 'POST' && finalBody && { body: JSON.stringify(finalBody) })
-    });
-
-    // Try to parse as JSON, but handle text responses gracefully
-    let data;
-    const contentType = response.headers.get('content-type');
-
-    try {
-      if (contentType?.includes('application/json')) {
-        data = await response.json();
-        console.log('📥 [SERVER] Response received:', {
-          status: response.status,
-          statusText: response.statusText,
-          data: data
-        });
-        if (isOnrampRequest) {
-          console.log('🔑 [SERVER] Onramp response keys:', Object.keys(data));
-          console.log('🔗 [SERVER] paymentLink:', JSON.stringify(data.paymentLink ?? 'NOT IN RESPONSE'));
-          console.log('📋 [SERVER] Full onramp response:', JSON.stringify(data));
-        }
-      } else {
-        // Non-JSON response (likely error), get as text
-        const textResponse = await response.text();
-        console.log('📥 [SERVER] Non-JSON response:', {
-          status: response.status,
-          statusText: response.statusText,
-          text: textResponse
-        });
-
-        // Return text error as JSON
-        return res.status(response.status).json({
-          error: textResponse || 'Upstream API error',
-          status: response.status
-        });
-      }
-    } catch (parseError) {
-      console.error('Failed to parse response:', parseError);
-      return res.status(response.status).json({
-        error: 'Failed to parse upstream response',
-        status: response.status
-      });
-    }
-
-    // Return the upstream response (preserve status code)
-    res.status(response.status).json(data);
-  
+    const upstream = await cdpFetch(url, 'POST', body);
+    await forwardCdpResponse(upstream, res);
   } catch (error) {
-    console.error('Proxy error:', error);
-    res.status(500).json({ 
-      error: "Proxy request failed", 
-      details: error instanceof Error ? error.message : 'Unknown error' 
-    });
+    console.error('❌ [ONRAMP SESSION] Error:', error);
+    res.status(500).json({ error: 'Failed to create onramp session' });
+  }
+});
+
+/**
+ * POST /onramp/order
+ * Create a guest-checkout (Apple Pay / Google Pay) onramp order.
+ * Enforces that partnerUserRef in the body belongs to the authenticated user.
+ * Body: { partnerUserRef, paymentAmount, paymentCurrency, purchaseCurrency,
+ *         paymentMethod, destinationNetwork, destinationAddress,
+ *         email, phoneNumber, phoneNumberVerifiedAt, agreementAcceptedAt, isQuote }
+ */
+app.post('/onramp/order', async (req, res) => {
+  try {
+    const userId = req.userId!;
+    const { partnerUserRef } = req.body;
+
+    if (partnerUserRef !== userId && partnerUserRef !== `sandbox-${userId}`) {
+      console.error(`❌ [ONRAMP ORDER] partnerUserRef mismatch: got "${partnerUserRef}", expected "${userId}" or "sandbox-${userId}"`);
+      return res.status(403).json({ error: 'Forbidden: partnerUserRef does not match authenticated user' });
+    }
+
+    const clientIp = await resolveClientIp(req);
+    const url = `${resolveCdpApiBase()}/v2/onramp/orders`;
+    const body = { ...req.body, clientIp };
+
+    if (req.body.isQuote) {
+      console.log('📌 [ONRAMP ORDER] Quote request');
+    }
+
+    const upstream = await cdpFetch(url, 'POST', body);
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [ONRAMP ORDER] Error:', error);
+    res.status(500).json({ error: 'Failed to create onramp order' });
+  }
+});
+
+/**
+ * POST /offramp/session
+ * Obtain a single-use offramp session token for the Coinbase sell flow.
+ * Body: { addresses: [{ address: string, blockchains: string[] }] }
+ */
+app.post('/offramp/session', async (req, res) => {
+  try {
+    const url = 'https://api.developer.coinbase.com/onramp/v1/token';
+    const upstream = await cdpFetch(url, 'POST', req.body);
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [OFFRAMP SESSION] Error:', error);
+    res.status(500).json({ error: 'Failed to create offramp session' });
+  }
+});
+
+/**
+ * POST /onramp/limits
+ * Fetch Apple Pay / Google Pay spending limits for a phone number.
+ * Body: { paymentMethodType, userId, userIdType }
+ */
+app.post('/onramp/limits', async (req, res) => {
+  try {
+    const url = `${resolveCdpApiBase()}/v2/onramp/limits`;
+    const upstream = await cdpFetch(url, 'POST', req.body);
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [ONRAMP LIMITS] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch onramp limits' });
+  }
+});
+
+/**
+ * GET /onramp/options
+ * Fetch available onramp payment methods and currencies (public data).
+ * All query params are forwarded as-is to the upstream.
+ */
+app.get('/onramp/options', async (req, res) => {
+  try {
+    const params = new URLSearchParams(req.query as Record<string, string>);
+    const url = `https://api.developer.coinbase.com/onramp/v1/buy/options?${params.toString()}`;
+    const upstream = await cdpFetch(url, 'GET');
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [ONRAMP OPTIONS] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch onramp options' });
+  }
+});
+
+/**
+ * GET /onramp/config
+ * Fetch the onramp supported-countries configuration (public data).
+ */
+app.get('/onramp/config', async (req, res) => {
+  try {
+    const url = 'https://api.developer.coinbase.com/onramp/v1/buy/config';
+    const upstream = await cdpFetch(url, 'GET');
+    await forwardCdpResponse(upstream, res);
+  } catch (error) {
+    console.error('❌ [ONRAMP CONFIG] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch onramp config' });
   }
 });
 

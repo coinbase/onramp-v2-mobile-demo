@@ -40,15 +40,11 @@ export async function createOfframpSession({
   console.log('📤 [OFFRAMP] Creating session token', { address, blockchain, asset, userId });
 
   // 1. Fetch a single-use session token from the backend proxy
-  const tokenRes = await authenticatedFetch(`${BASE_URL}/server/api`, {
+  const tokenRes = await authenticatedFetch(`${BASE_URL}/offramp/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      url: 'https://api.developer.coinbase.com/onramp/v1/token',
-      method: 'POST',
-      body: {
-        addresses: [{ address, blockchains: [blockchain] }],
-      },
+      addresses: [{ address, blockchains: [blockchain] }],
     }),
   });
 

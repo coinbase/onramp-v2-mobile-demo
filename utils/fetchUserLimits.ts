@@ -16,32 +16,21 @@ export async function fetchUserLimits(
   accessToken?: string
 ): Promise<UserLimitsResponse> {
   try {
-    const apiUrl = 'https://api.cdp.coinbase.com/platform/v2/onramp/limits';
-
     const requestBody = {
       paymentMethodType: "GUEST_CHECKOUT_APPLE_PAY",
       userId: phoneNumber,
       userIdType: "phone_number"
     };
 
-    console.log('User limits request →', {
-      url: apiUrl,
-      phoneNumber,
-      method: "POST",
-      hasToken: !!accessToken
-    });
+    console.log('User limits request →', { phoneNumber, hasToken: !!accessToken });
 
-    const response = await fetch(`${BASE_URL}/server/api`, {
-      method: "POST", // Calling local proxy with POST
+    const response = await fetch(`${BASE_URL}/onramp/limits`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({
-        url: apiUrl,
-        method: "POST",
-        body: requestBody
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const responseClone = response.clone();

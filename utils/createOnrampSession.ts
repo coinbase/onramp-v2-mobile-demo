@@ -5,23 +5,14 @@ export async function createOnrampSession(payload: any) {
 try {
   console.log('📤 [API] createOnrampSession');
 
-  // Test mode: Server automatically applies sandbox=true for TestFlight tokens
-  const url = "https://api.cdp.coinbase.com/platform/v2/onramp/sessions";
+  console.log('API request →', payload);
 
-  const requestBody = {
-    url,
-    method: "POST",
-    body: payload
-  };
-
-  console.log('API request →', requestBody);
-
-  const res = await authenticatedFetch(`${BASE_URL}/server/api`, {
+  const res = await authenticatedFetch(`${BASE_URL}/onramp/session`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(payload)
   });
 
   console.log('📥 [RESPONSE] Status:', res.status, res.statusText);

@@ -95,7 +95,7 @@ export default function History() {
       }
 
       const accessToken = await getAccessToken();
-      const result = await fetchTransactionHistory(userId, pageKey, 10, accessToken || undefined);
+      const result = await fetchTransactionHistory(pageKey, 10, accessToken || undefined);
 
       console.log('📊 [HISTORY] API result:', {
         receivedTxCount: result.transactions?.length || 0,

@@ -1,35 +1,23 @@
 import { BASE_URL } from "../constants/BASE_URL";
 
 export async function fetchTransactionHistory(
-  userId: string,
   pageKey?: string,
   pageSize: number = 10,
   accessToken?: string
 ) {
   try {
-    // Format: /buy/user/{userId}/transactions
-    let fullUrl = `https://api.developer.coinbase.com/onramp/v1/buy/user/${encodeURIComponent(userId)}/transactions?pageSize=${pageSize}`;
+    let url = `${BASE_URL}/onramp/transactions?pageSize=${pageSize}`;
     if (pageKey) {
-      fullUrl += `&pageKey=${encodeURIComponent(pageKey)}`;
+      url += `&pageKey=${encodeURIComponent(pageKey)}`;
     }
 
-    console.log('Transaction history request →', {
-      url: fullUrl,
-      userId,
-      method: "GET",
-      hasToken: !!accessToken
-    });
+    console.log('Transaction history request →', { url, pageSize, hasToken: !!accessToken });
 
-    const response = await fetch(`${BASE_URL}/server/api`, {
-      method: "POST", // Calling local proxy with POST
+    const response = await fetch(url, {
+      method: "GET",
       headers: {
-        "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({
-        url: fullUrl,
-        method: "GET"
-      })
     });
 
     const responseClone = response.clone();

@@ -92,7 +92,8 @@ export default function OfframpSendScreen() {
     const tryFetch = async (attempt: number) => {
       try {
         console.log(`📡 [OFFRAMP SEND] Fetching transaction, attempt ${attempt}/${MAX_ATTEMPTS}`);
-        const tx = await fetchOfframpTransaction(partnerUserRef);
+        const sandbox = partnerUserRef?.startsWith('sandbox-');
+        const tx = await fetchOfframpTransaction(sandbox);
         if (tx) {
           setTransaction(tx);
           setLoading(false);

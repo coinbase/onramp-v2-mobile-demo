@@ -26,17 +26,13 @@ export interface OfframpTransaction {
  * already exists at that point (created when user clicked "Cash out now").
  */
 export async function fetchOfframpTransaction(
-  partnerUserRef: string
+  sandbox?: boolean
 ): Promise<OfframpTransaction | null> {
-  const url = `https://api.developer.coinbase.com/onramp/v1/sell/user/${encodeURIComponent(partnerUserRef)}/transactions`;
+  const url = `${BASE_URL}/offramp/transactions${sandbox ? '?sandbox=true' : ''}`;
 
-  console.log('📤 [OFFRAMP TX] Fetching transaction for', partnerUserRef);
+  console.log('📤 [OFFRAMP TX] Fetching transaction', { sandbox });
 
-  const res = await authenticatedFetch(`${BASE_URL}/server/api`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, method: 'GET' }),
-  });
+  const res = await authenticatedFetch(url, { method: 'GET' });
 
   if (!res.ok) {
     const err = await res.json().catch(() => null);

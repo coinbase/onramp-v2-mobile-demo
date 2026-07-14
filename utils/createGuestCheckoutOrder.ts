@@ -14,16 +14,12 @@ export async function createGuestCheckoutOrder(payload: any) {
     const method = payload.paymentMethod?.includes('GOOGLE') ? 'Google Pay' : 'Apple Pay';
     console.log(`📤 [API] createGuestCheckoutOrder (${method})`);
 
-    const response = await authenticatedFetch(`${BASE_URL}/server/api`, {
+    const response = await authenticatedFetch(`${BASE_URL}/onramp/order`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        url: "https://api.cdp.coinbase.com/platform/v2/onramp/orders",
-        method: "POST",
-        body: payload
-      })
+      body: JSON.stringify(payload)
     });
 
     console.log('📥 [RESPONSE] Status:', response.status, response.statusText);
