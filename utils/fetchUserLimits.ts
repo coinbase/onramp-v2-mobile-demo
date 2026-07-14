@@ -12,17 +12,10 @@ export interface UserLimitsResponse {
 }
 
 export async function fetchUserLimits(
-  phoneNumber: string,
   accessToken?: string
 ): Promise<UserLimitsResponse> {
   try {
-    const requestBody = {
-      paymentMethodType: "GUEST_CHECKOUT_APPLE_PAY",
-      userId: phoneNumber,
-      userIdType: "phone_number"
-    };
-
-    console.log('User limits request →', { phoneNumber, hasToken: !!accessToken });
+    console.log('User limits request →', { hasToken: !!accessToken });
 
     const response = await fetch(`${BASE_URL}/onramp/limits`, {
       method: "POST",
@@ -30,7 +23,7 @@ export async function fetchUserLimits(
         "Content-Type": "application/json",
         "Authorization": `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({}),
     });
 
     const responseClone = response.clone();

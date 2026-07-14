@@ -614,7 +614,7 @@ const usSubs = useMemo(() => {
         return;
       }
 
-      const response = await fetchUserLimits(verifiedPhone, accessToken);
+      const response = await fetchUserLimits(accessToken);
 
       // Parse limits into structured format
       const weeklyLimit = response.limits.find(l => l.limitType === 'weekly_spending');

@@ -327,13 +327,21 @@ app.post('/offramp/session', async (req, res) => {
 
 /**
  * POST /onramp/limits
- * Fetch Apple Pay / Google Pay spending limits for a phone number.
- * Body: { paymentMethodType, userId, userIdType }
+ * Fetch Apple Pay spending limits for the authenticated user.
+ * Phone number is derived server-side from the validated auth token — never trusted from client.
  */
 app.post('/onramp/limits', async (req, res) => {
   try {
+    const phoneNumber = (req as any).userData?.authenticationMethods?.sms?.phoneNumber;
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'No phone number linked to this account' });
+    }
     const url = `${resolveCdpApiBase()}/v2/onramp/limits`;
-    const upstream = await cdpFetch(url, 'POST', req.body);
+    const upstream = await cdpFetch(url, 'POST', {
+      paymentMethodType: 'GUEST_CHECKOUT_APPLE_PAY',
+      userId: phoneNumber,
+      userIdType: 'phone_number',
+    });
     await forwardCdpResponse(upstream, res);
   } catch (error) {
     console.error('❌ [ONRAMP LIMITS] Error:', error);
