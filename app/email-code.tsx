@@ -5,8 +5,6 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { CoinbaseAlert } from '../components/ui/CoinbaseAlerts';
 import { COLORS } from '../constants/Colors';
-import { isTestAccount, TEST_ACCOUNTS } from '../constants/TestAccounts';
-import { setCurrentSolanaAddress, setCurrentWalletAddress, setTestSession } from '../utils/sharedState';
 
 const { DARK_BG, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BORDER, BLUE, WHITE } = COLORS;
 const RESEND_SECONDS = 30;
@@ -42,12 +40,6 @@ export default function EmailCodeScreen() {
   }, [resendSeconds]);
 
   const resendCode = async () => {
-    // Skip resend for test accounts
-    if (isTestAccount(email)) {
-      setResendSeconds(RESEND_SECONDS);
-      return;
-    }
-
     setSending(true);
     try {
       console.log(`📤 [Email Resend] Resending code for ${mode} flow`);
@@ -85,33 +77,7 @@ export default function EmailCodeScreen() {
     if (!flowId || !otp) return;
     setVerifying(true);
     try {
-      // Check if this is a test account (TestFlight) - only for signin mode
-      if (isTestAccount(email) && mode === 'signin') {
-        console.log('🧪 Test account detected, activating mock session');
-
-        // Verify OTP matches
-        if (otp !== TEST_ACCOUNTS.otp) {
-          throw new Error(`Test account OTP must be: ${TEST_ACCOUNTS.otp}`);
-        }
-
-        // Set up mock session (no CDP involved)
-        await setTestSession(TEST_ACCOUNTS.wallets.evm, TEST_ACCOUNTS.wallets.solana);
-        setCurrentWalletAddress(TEST_ACCOUNTS.wallets.evm);
-        setCurrentSolanaAddress(TEST_ACCOUNTS.wallets.solana);
-
-        setAlert({
-          visible: true,
-          title: 'TestFlight Mode',
-          message: `Welcome, TestFlight Reviewer!\n\nTest Credentials:\n• Email: ${TEST_ACCOUNTS.email}\n• OTP: ${TEST_ACCOUNTS.otp}\n• Phone: ${TEST_ACCOUNTS.phone}\n• SMS Code: ${TEST_ACCOUNTS.smsCode}\n\nYou can test the full production flow without payment.`,
-          type: 'info'
-        });
-
-        // Navigate immediately
-        router.dismissAll();
-        return;
-      }
-
-      // Real account flow via CDP
+      // Account flow via CDP
       console.log(`📤 [Email Verify] Verifying ${mode} flow`);
 
       // Use same verification hook for both signin and link

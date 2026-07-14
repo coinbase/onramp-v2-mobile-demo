@@ -1,11 +1,6 @@
 import { generateJwt } from '@coinbase/cdp-sdk/auth';
 import type { NextFunction, Request, Response } from 'express';
 
-// TestFlight account constants (matches /constants/TestAccounts.ts)
-const TESTFLIGHT_EMAIL = 'reviewer@coinbase-demo.app';
-const TESTFLIGHT_PHONE = '+12345678901';
-const TESTFLIGHT_USER_ID = '286ef934-f3b8-4e94-b61f-1f1a088ac95e';
-
 // Cache validated tokens to reduce API calls
 const tokenCache = new Map<string, { userId: string, expiresAt: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -16,24 +11,8 @@ export async function validateAccessToken(
   next: NextFunction
 ) {
   try {
-    // Check for TestFlight account (bypass authentication)
     const authHeader = req.headers.authorization;
     const token = authHeader?.replace('Bearer ', '');
-    const isTestFlightToken = token?.includes('testflight');
-    const isTestFlightEmail = req.body?.email === TESTFLIGHT_EMAIL;
-    const isTestFlightPhone = req.body?.phoneNumber === TESTFLIGHT_PHONE;
-    const isTestFlightUserId = req.body?.url?.includes(TESTFLIGHT_USER_ID);
-
-    if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone || isTestFlightUserId) {
-      console.log('🧪 [AUTH] TestFlight account - bypassing authentication');
-      req.userId = 'testflight-reviewer';
-      req.userData = {
-        id: 'testflight-reviewer',
-        email: TESTFLIGHT_EMAIL,
-        testAccount: true
-      };
-      return next();
-    }
 
     // All /server/api calls require authentication
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -88,25 +67,14 @@ export async function validateAccessToken(
     const userEmail = userData.authenticationMethods[0]?.email || 'unknown';
     console.log('✅ [AUTH] Token validated (fresh) for user:', userEmail);
 
-    // Check if this is a TestFlight test account by email
-    const isTestAccount = userEmail === TESTFLIGHT_EMAIL || userEmail === 'devtest@coinbase-demo.app';
-
     // Cache the result
     tokenCache.set(token as string, {
       userId: userData.userId,
       expiresAt: Date.now() + CACHE_TTL
     });
 
-    // Add user info to request
     req.userId = userData.userId;
-    req.userData = {
-      ...userData,
-      testAccount: isTestAccount // Mark as test account if email matches
-    };
-
-    if (isTestAccount) {
-      console.log('🧪 [AUTH] TestFlight email detected:', userEmail);
-    }
+    req.userData = userData;
 
     next();
   } catch (error) {

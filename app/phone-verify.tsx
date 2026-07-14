@@ -106,18 +106,6 @@ export default function PhoneVerifyScreen() {
 
     setSending(true);
     try {
-      // Check if this is test phone (TestFlight) - bypass CDP
-      if (phoneE164 === TEST_ACCOUNTS.phone) {
-        console.log(`🧪 Test phone detected, skipping CDP SMS (mode: ${mode})`);
-
-        // Navigate directly to code screen
-        router.push({
-          pathname: '/phone-code',
-          params: { phone: phoneE164, mode }
-        });
-        return;
-      }
-
       // Real phone verification flow via CDP
       console.log(`📤 [SMS] Starting ${mode} flow for phone`);
       console.log('Debug info:', {

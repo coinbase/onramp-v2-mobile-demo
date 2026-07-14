@@ -1,4 +1,4 @@
-import { getCurrentPartnerUserRef, isTestSessionActive } from "@/utils/sharedState";
+import { getCurrentPartnerUserRef } from "@/utils/sharedState";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useEffect, useState } from "react";
@@ -14,7 +14,6 @@ import {
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { FailedTransactionBadge } from "../../components/ui/FailedTransactionCard";
 import { COLORS } from "../../constants/Colors";
-import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { fetchTransactionHistory } from "../../utils/fetchTransactionHistory";
 import { fetchOnrampEvents, type OnrampEvent } from "../../utils/fetchOnrampEvents";
 import { getWebViewEvents, type WebViewEvent } from "../../utils/sharedState";
@@ -70,9 +69,7 @@ export default function History() {
   });
 
   const loadTransactions = useCallback(async (pageKey?: string, append: boolean = false) => {
-    // Use CDP userId or test account userId for TestFlight
-    const isTestFlight = isTestSessionActive();
-    const userId = isTestFlight ? TEST_ACCOUNTS.userId : currentUser?.userId;
+    const userId = currentUser?.userId;
 
     if (!userId) {
       console.log('No user ID available yet');
@@ -141,8 +138,7 @@ export default function History() {
   const loadEvents = useCallback(async () => {
     setLoadingEvents(true);
     try {
-      const isTestFlight = isTestSessionActive();
-      const token = isTestFlight ? 'testflight-mock-token' : (await getAccessToken() || '');
+      const token = await getAccessToken() || '';
       const result = await fetchOnrampEvents(token);
       setEvents(result);
     } catch (error) {
@@ -154,8 +150,7 @@ export default function History() {
 
   useFocusEffect(
     useCallback(() => {
-      const isTestFlight = isTestSessionActive();
-      const userId = isTestFlight ? TEST_ACCOUNTS.userId : currentUser?.userId;
+      const userId = currentUser?.userId;
       console.log('History tab focused, userId:', userId);
       setCurrentUserRef(userId || null);
 
@@ -170,9 +165,7 @@ export default function History() {
   );
 
   useEffect(() => {
-    const isTestFlight = isTestSessionActive();
-    const userId = isTestFlight ? TEST_ACCOUNTS.userId : currentUser?.userId;
-    setCurrentUserRef(userId || null);
+    setCurrentUserRef(currentUser?.userId || null);
 
     // Load transactions when user is available
     if (userId) {

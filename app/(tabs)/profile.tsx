@@ -352,26 +352,14 @@ export default function WalletScreen() {
     setBalancesError(null);
 
     try {
-      // Check if TestFlight mode
-      const { isTestSessionActive } = await import('@/utils/sharedState');
-      const isTestFlight = isTestSessionActive();
+      const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
+      const accessToken = await getAccessTokenGlobal();
 
-      let accessToken: string | null = null;
-
-      if (isTestFlight) {
-        console.log('🧪 [PROFILE] TestFlight mode - using mock token');
-        accessToken = 'testflight-mock-token';
-      } else {
-        // Get access token from CDP (real accounts)
-        const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
-        accessToken = await getAccessTokenGlobal();
-
-        if (!accessToken) {
-          console.error('❌ [PROFILE] No access token available');
-          setBalancesError('Authentication required');
-          setLoadingBalances(false);
-    return;
-        }
+      if (!accessToken) {
+        console.error('❌ [PROFILE] No access token available');
+        setBalancesError('Authentication required');
+        setLoadingBalances(false);
+        return;
       }
 
       const allBalances: any[] = [];
@@ -443,26 +431,14 @@ export default function WalletScreen() {
     setTestnetBalancesError(null);
 
     try {
-      // Check if TestFlight mode
-      const { isTestSessionActive } = await import('@/utils/sharedState');
-      const isTestFlight = isTestSessionActive();
+      const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
+      const accessToken = await getAccessTokenGlobal();
 
-      let accessToken: string | null = null;
-
-      if (isTestFlight) {
-        console.log('🧪 [PROFILE] TestFlight mode - using mock token for testnet');
-        accessToken = 'testflight-mock-token';
-      } else {
-        // Get access token from CDP (real accounts)
-        const { getAccessTokenGlobal } = await import('@/utils/getAccessTokenGlobal');
-        accessToken = await getAccessTokenGlobal();
-
-        if (!accessToken) {
-          console.error('❌ [PROFILE] No access token available for testnet');
-          setTestnetBalancesError('Authentication required');
-          setLoadingTestnetBalances(false);
-      return;
-        }
+      if (!accessToken) {
+        console.error('❌ [PROFILE] No access token available for testnet');
+        setTestnetBalancesError('Authentication required');
+        setLoadingTestnetBalances(false);
+        return;
       }
 
       const allTestnetBalances: any[] = [];

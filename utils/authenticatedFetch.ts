@@ -23,33 +23,21 @@
  */
 
 import { getAccessTokenGlobal } from './getAccessTokenGlobal';
-import { isTestSessionActive } from './sharedState';
 
 export async function authenticatedFetch(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
-  // Prepare headers
   const headers = new Headers(init?.headers || {});
 
-  // Handle TestFlight test accounts (bypass CDP authentication)
-  if (isTestSessionActive()) {
-    console.log('🧪 [AUTH FETCH] TestFlight mode - using mock authentication');
-    if (!headers.has('Authorization')) {
-      headers.set('Authorization', 'Bearer testflight-mock-token');
-    }
-  } else {
-    // Real account - get CDP access token
-    const token = await getAccessTokenGlobal();
+  const token = await getAccessTokenGlobal();
 
-    if (!token) {
-      throw new Error('Authentication required. Please connect your wallet first.');
-    }
+  if (!token) {
+    throw new Error('Authentication required. Please connect your wallet first.');
+  }
 
-    // Add Authorization header (won't overwrite if already exists)
-    if (!headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
+  if (!headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   // Log for debugging (in development)

@@ -4,8 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { CoinbaseAlert } from '../components/ui/CoinbaseAlerts';
 import { COLORS } from '../constants/Colors';
-import { TEST_ACCOUNTS } from '../constants/TestAccounts';
-import { setVerifiedPhone, setCurrentWalletAddress, setCurrentSolanaAddress, setTestSession } from '../utils/sharedState';
+import { setVerifiedPhone } from '../utils/sharedState';
 import { useCurrentUser, useVerifySmsOTP, useSignInWithSms, useLinkSms, useIsInitialized } from '@coinbase/cdp-hooks';
 
 const { DARK_BG, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, BORDER, BLUE, WHITE } = COLORS;
@@ -42,12 +41,6 @@ export default function PhoneCodeScreen() {
   }, [resendSeconds]);
 
   const resendCode = async () => {
-    // Skip resend for test accounts
-    if (phone === TEST_ACCOUNTS.phone) {
-      setResendSeconds(RESEND_SECONDS);
-      return;
-    }
-
     setSending(true);
     try {
       console.log(`📤 [SMS Resend] Resending code for ${mode} flow`);
@@ -85,52 +78,6 @@ export default function PhoneCodeScreen() {
     if (!phone || !code) return;
     setVerifying(true);
     try {
-      // Check if this is test phone (TestFlight)
-      if (phone === TEST_ACCOUNTS.phone) {
-        console.log(`🧪 Test phone detected, using mock verification (mode: ${mode})`);
-
-        if (code !== TEST_ACCOUNTS.smsCode) {
-          throw new Error(`Test SMS code must be: ${TEST_ACCOUNTS.smsCode}`);
-        }
-
-        if (mode === 'signin') {
-          // Mock wallet creation for TestFlight
-          console.log('🧪 Creating test session for phone signin');
-          await setTestSession(TEST_ACCOUNTS.wallets.evm, TEST_ACCOUNTS.wallets.solana);
-          setCurrentWalletAddress(TEST_ACCOUNTS.wallets.evm);
-          setCurrentSolanaAddress(TEST_ACCOUNTS.wallets.solana);
-          await setVerifiedPhone(phone, TEST_ACCOUNTS.userId);
-          router.replace('/(tabs)');
-        } else if (mode === 'reverify') {
-          // Mock phone re-verification for TestFlight
-          console.log('🧪 Re-verifying test phone');
-          await setVerifiedPhone(phone, TEST_ACCOUNTS.userId);
-
-          setAlert({
-            visible: true,
-            title: 'Phone Re-verified ✅',
-            message: 'Your test phone has been re-verified and is ready for Apple Pay checkout.',
-            type: 'success'
-          });
-
-          setTimeout(() => router.dismissAll(), 1500);
-        } else {
-          // Mock phone linking for TestFlight
-          console.log('🧪 Storing test phone for linking');
-          await setVerifiedPhone(phone, TEST_ACCOUNTS.userId);
-
-          setAlert({
-            visible: true,
-            title: 'Phone Verified',
-            message: 'Your test phone has been linked to your account.',
-            type: 'success'
-          });
-
-          setTimeout(() => router.dismissAll(), 1500);
-        }
-        return;
-      }
-
       // Real phone verification flow via CDP
       console.log(`📤 [SMS Verify] Verifying ${mode} flow`);
 
