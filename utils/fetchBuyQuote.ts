@@ -92,16 +92,12 @@ export async function fetchBuyQuote(payload: {
     console.log('📤 [API] fetchBuyQuote (Widget)');
 
     // v2 quote for Coinbase Widget (session endpoint)
-    const response = await authenticatedFetch(`${BASE_URL}/server/api`, {
+    const response = await authenticatedFetch(`${BASE_URL}/onramp/session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        url: 'https://api.cdp.coinbase.com/platform/v2/onramp/sessions',
-        method: 'POST',
-        body: v2Payload,
-      }),
+      body: JSON.stringify(v2Payload),
     });
   
     if (!response.ok) {
