@@ -24,16 +24,17 @@ export async function validateAccessToken(
     const isTestFlightPhone = req.body?.phoneNumber === TESTFLIGHT_PHONE;
     const isTestFlightUserId = req.body?.url?.includes(TESTFLIGHT_USER_ID);
 
-    if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone || isTestFlightUserId) {
-      console.log('🧪 [AUTH] TestFlight account - bypassing authentication');
-      req.userId = 'testflight-reviewer';
-      req.userData = {
-        id: 'testflight-reviewer',
-        email: TESTFLIGHT_EMAIL,
-        testAccount: true
-      };
-      return next();
-    }
+    // DISABLED 2026-07-13: auth bypass removed due to security incident
+    // if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone || isTestFlightUserId) {
+    //   console.log('🧪 [AUTH] TestFlight account - bypassing authentication');
+    //   req.userId = 'testflight-reviewer';
+    //   req.userData = {
+    //     id: 'testflight-reviewer',
+    //     email: TESTFLIGHT_EMAIL,
+    //     testAccount: true
+    //   };
+    //   return next();
+    // }
 
     // All /server/api calls require authentication
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
