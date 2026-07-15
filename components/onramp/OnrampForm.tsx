@@ -155,7 +155,7 @@ export function OnrampForm({
 
   const [asset, setAsset] = useState("USDC");
   const [network, setNetwork] = useState("Base");
-  const [paymentMethod, setPaymentMethod] = useState("GUEST_CHECKOUT_APPLE_PAY");
+  const [paymentMethod, setPaymentMethod] = useState("APP2APP_COINBASE");
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
   const [networkPickerVisible, setNetworkPickerVisible] = useState(false);
   const [paymentPickerVisible, setPaymentPickerVisible] = useState(false);

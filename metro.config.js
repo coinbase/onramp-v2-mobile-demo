@@ -9,6 +9,24 @@ const config = getDefaultConfig(projectRoot);
 
 // Simple resolver matching working demo - NO ALIASES
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // extraNodeModules handles static imports but NOT dynamic import() — Metro
+  // re-resolves dynamic imports at runtime using a relative path, which breaks
+  // when the target is outside the project root. Explicit resolveRequest entries
+  // cover both static and dynamic imports.
+  if (moduleName === '@coinbase/cdp-app-attest') {
+    return {
+      type: 'sourceFile',
+      filePath: path.resolve(projectRoot, '../cdp-web/packages/cdp-app-attest/dist/esm/index.js'),
+    };
+  }
+
+  if (moduleName === '@coinbase/cdp-react-native') {
+    return {
+      type: 'sourceFile',
+      filePath: path.resolve(projectRoot, '../cdp-web/packages/react-native/dist/esm/index.js'),
+    };
+  }
+
   if (moduleName.includes("zustand")) {
     const result = require.resolve(moduleName);
     return context.resolveRequest(context, result, platform);

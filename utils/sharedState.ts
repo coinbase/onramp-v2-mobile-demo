@@ -157,9 +157,9 @@ export const markPhoneVerifyCanceled = () => { phoneVerifyCanceled = true; };
 export const getPhoneVerifyWasCanceled = () => phoneVerifyCanceled;
 export const clearPhoneVerifyWasCanceled = () => { phoneVerifyCanceled = false; };
 
-// Sandbox mode - always defaults to ON for safety (prevents accidental real transactions)
+// Sandbox mode - defaults to OFF (App2App does not support sandbox)
 // Does NOT persist across app restarts - intentional design
-let sandboxMode: boolean = true;
+let sandboxMode: boolean = false;
 
 export const getSandboxMode = () => sandboxMode;
 export const setSandboxMode = (enabled: boolean) => {
@@ -167,10 +167,10 @@ export const setSandboxMode = (enabled: boolean) => {
   console.log('Sandbox mode:', enabled ? 'ENABLED' : 'DISABLED');
 };
 
-// Initialize sandbox mode - always starts as ON for safety
+// Initialize sandbox mode - starts as OFF (App2App does not support sandbox)
 export const hydrateSandboxMode = async () => {
-  sandboxMode = true;
-  console.log('ℹ️ Sandbox mode initialized to default: ENABLED (for safety)');
+  sandboxMode = false;
+  console.log('ℹ️ Sandbox mode initialized to default: DISABLED');
 };
 
 // ============================================================================
