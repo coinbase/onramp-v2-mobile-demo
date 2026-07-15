@@ -332,7 +332,12 @@ app.post('/offramp/session', async (req, res) => {
  */
 app.post('/onramp/limits', async (req, res) => {
   try {
-    const phoneNumber = (req as any).userData?.authenticationMethods?.sms?.phoneNumber;
+    // req.userData.authenticationMethods is the raw CDP API array (e.g. [{type:'sms', phoneNumber:...}]).
+    // The SDK's toAuthState() converts it to a keyed object on the client, but that transform
+    // is never applied server-side, so we must use .find() here.
+    const methods: Array<{ type: string; phoneNumber?: string }> =
+      (req as any).userData?.authenticationMethods ?? [];
+    const phoneNumber = methods.find((m) => m.type === 'sms')?.phoneNumber;
     if (!phoneNumber) {
       return res.status(400).json({ error: 'No phone number linked to this account' });
     }

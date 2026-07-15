@@ -4,7 +4,6 @@ import type { NextFunction, Request, Response } from 'express';
 // TestFlight account constants (matches /constants/TestAccounts.ts)
 const TESTFLIGHT_EMAIL = 'reviewer@coinbase-demo.app';
 const TESTFLIGHT_PHONE = '+12345678901';
-const TESTFLIGHT_USER_ID = '286ef934-f3b8-4e94-b61f-1f1a088ac95e';
 
 // Cache validated tokens to reduce API calls
 const tokenCache = new Map<string, { userId: string, expiresAt: number }>();
@@ -22,9 +21,9 @@ export async function validateAccessToken(
     const isTestFlightToken = token?.includes('testflight');
     const isTestFlightEmail = req.body?.email === TESTFLIGHT_EMAIL;
     const isTestFlightPhone = req.body?.phoneNumber === TESTFLIGHT_PHONE;
-    const isTestFlightUserId = req.body?.url?.includes(TESTFLIGHT_USER_ID);
+    // Note: isTestFlightUserId (req.body?.url) was removed — no route passes req.body.url anymore.
 
-    if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone || isTestFlightUserId) {
+    if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone) {
       console.log('🧪 [AUTH] TestFlight account - bypassing authentication');
       req.userId = 'testflight-reviewer';
       req.userData = {
@@ -85,7 +84,11 @@ export async function validateAccessToken(
     }
 
     const userData = await response.json();
-    const userEmail = userData.authenticationMethods[0]?.email || 'unknown';
+    // authenticationMethods is a raw array from the CDP API — use .find(), not object-key access.
+    const emailMethod = userData.authenticationMethods?.find(
+      (m: { type: string; email?: string }) => m.type === 'email'
+    );
+    const userEmail = emailMethod?.email || 'unknown';
     console.log('✅ [AUTH] Token validated (fresh) for user:', userEmail);
 
     // Check if this is a TestFlight test account by email
