@@ -4,6 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 // TestFlight account constants (matches /constants/TestAccounts.ts)
 const TESTFLIGHT_EMAIL = 'reviewer@coinbase-demo.app';
 const TESTFLIGHT_PHONE = '+12345678901';
+const TESTFLIGHT_USER_ID = '286ef934-f3b8-4e94-b61f-1f1a088ac95e';
 
 // Cache validated tokens to reduce API calls
 const tokenCache = new Map<string, { userId: string, expiresAt: number }>();
@@ -23,16 +24,17 @@ export async function validateAccessToken(
     const isTestFlightPhone = req.body?.phoneNumber === TESTFLIGHT_PHONE;
     // Note: isTestFlightUserId (req.body?.url) was removed — no route passes req.body.url anymore.
 
-    if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone) {
-      console.log('🧪 [AUTH] TestFlight account - bypassing authentication');
-      req.userId = 'testflight-reviewer';
-      req.userData = {
-        id: 'testflight-reviewer',
-        email: TESTFLIGHT_EMAIL,
-        testAccount: true
-      };
-      return next();
-    }
+    // DISABLED 2026-07-13: auth bypass removed due to security incident
+    // if (isTestFlightToken || isTestFlightEmail || isTestFlightPhone || isTestFlightUserId) {
+    //   console.log('🧪 [AUTH] TestFlight account - bypassing authentication');
+    //   req.userId = 'testflight-reviewer';
+    //   req.userData = {
+    //     id: 'testflight-reviewer',
+    //     email: TESTFLIGHT_EMAIL,
+    //     testAccount: true
+    //   };
+    //   return next();
+    // }
 
     // All /server/api calls require authentication
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
