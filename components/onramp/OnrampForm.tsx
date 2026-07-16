@@ -353,12 +353,26 @@ const usSubs = useMemo(() => {
    */
 
   const availableNetworks = useMemo(() => {
-    if (!getAvailableNetworks) return ["ethereum", "base"]; // Fallback (shouldn't happen)
+    if (!getAvailableNetworks) {
+      // Mirror useOnramp FALLBACK_PURCHASE_CURRENCIES (shouldn't happen in practice)
+      return [
+        { name: "base", display_name: "Base", icon_url: null },
+        { name: "ethereum", display_name: "Ethereum", icon_url: null },
+        { name: "solana", display_name: "Solana", icon_url: null },
+      ];
+    }
     return getAvailableNetworks(asset);
   }, [asset, getAvailableNetworks]);
 
   const availableAssets = useMemo(() => {
-    if (!getAvailableAssets) return ["USDC", "ETH"]; // Fallback (shouldn't happen)
+    if (!getAvailableAssets) {
+      // Mirror useOnramp FALLBACK_PURCHASE_CURRENCIES (shouldn't happen in practice)
+      return [
+        { name: "USD Coin", symbol: "USDC", icon_url: null },
+        { name: "Ethereum", symbol: "ETH", icon_url: null },
+        { name: "Solana", symbol: "SOL", icon_url: null },
+      ];
+    }
     return getAvailableAssets(network);
   }, [network, getAvailableAssets]);
 
