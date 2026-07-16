@@ -499,9 +499,14 @@ export default function Index() {
 
     // Determine the correct address based on network type (moved outside try-catch)
     const isSandbox = getSandboxMode();
-    let targetAddress = formData.address;
+    const addressOverride =
+      typeof formData.destinationAddressOverride === 'string'
+        ? formData.destinationAddressOverride.trim()
+        : '';
+    // App2App optional override wins over the generated/exportable wallet address.
+    let targetAddress = addressOverride || formData.address;
 
-    if (!isSandbox) {
+    if (!addressOverride && !isSandbox) {
       // In production mode, use network-specific addresses
       const networkType = networkApiName.toLowerCase();
       const isEvmNetwork = ['ethereum', 'base', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'avax', 'bsc', 'fantom', 'linea', 'zksync', 'scroll'].some(k => networkType.includes(k));
