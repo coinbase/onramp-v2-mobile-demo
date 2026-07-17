@@ -59,10 +59,6 @@ function computeRedirectUrl(): string {
 }
 const REDIRECT_URL = computeRedirectUrl();
 
-// App Attest App ID in `teamID.bundleID` form — never hardcode a real value;
-// configure via EXPO_PUBLIC_APP_ATTEST_APP_ID (see .env.example).
-const APP_ATTEST_APP_ID = process.env.EXPO_PUBLIC_APP_ATTEST_APP_ID || "";
-
 // CDP project that owns this onramp integration.
 const ONRAMP_PROJECT_ID =
   process.env.EXPO_PUBLIC_ONRAMP_PROJECT_ID ||
@@ -85,7 +81,6 @@ export function useApp2App() {
       try {
         await openCoinbaseOnramp({
           projectId: ONRAMP_PROJECT_ID,
-          appAttestAppId: APP_ATTEST_APP_ID,
           destinationAddress: params.destinationAddress,
           destinationNetwork: params.destinationNetwork,
           purchaseCurrency: params.purchaseCurrency,

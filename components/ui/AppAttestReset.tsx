@@ -20,6 +20,13 @@ import { COLORS } from "../../constants/Colors";
 
 const { TEXT_SECONDARY, BORDER } = COLORS;
 
+// Must match the projectId passed to openCoinbaseOnramp — registration flags
+// are scoped per CDP project in @coinbase/cdp-app-attest.
+const ONRAMP_PROJECT_ID =
+  process.env.EXPO_PUBLIC_ONRAMP_PROJECT_ID ||
+  process.env.EXPO_PUBLIC_CDP_PROJECT_ID ||
+  "";
+
 export function AppAttestReset() {
   const [busy, setBusy] = useState(false);
 
@@ -37,7 +44,10 @@ export function AppAttestReset() {
           onPress: async () => {
             setBusy(true);
             try {
-              await clearOnrampAttestation();
+              if (!ONRAMP_PROJECT_ID) {
+                throw new Error("Missing EXPO_PUBLIC_ONRAMP_PROJECT_ID / EXPO_PUBLIC_CDP_PROJECT_ID");
+              }
+              await clearOnrampAttestation(ONRAMP_PROJECT_ID);
               Alert.alert(
                 "Attestation cleared",
                 "A fresh key will be created on your next app-to-app attempt.",
