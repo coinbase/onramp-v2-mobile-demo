@@ -8,7 +8,10 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "cdp:local": "node tools/cdp-local.js local",
+    "cdp:npm": "node tools/cdp-local.js npm",
+    "cdp:status": "node tools/cdp-local.js status"
   },
   "dependencies": {
     "@coinbase/cdp-api-client": "0.0.116",

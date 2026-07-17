@@ -41,6 +41,20 @@ https://github.com/user-attachments/assets/f1e5f3b3-5331-49d9-bd4e-36fd630697d9
 - Node.js/Express backend
 - Expo Notifications
 
+## Local CDP SDK co-development
+
+`package.json` always pins the published npm packages (e.g. `@coinbase/cdp-react-native@0.0.116`). To iterate against a sibling [`cdp-web`](https://github.com/coinbase/cdp-web) checkout without changing committed deps:
+
+```bash
+# Expects ../cdp-web (override with CDP_WEB_ROOT=/path/to/cdp-web)
+# Build the packages first in cdp-web, then:
+npm run cdp:local     # symlink node_modules → ../cdp-web/packages/...
+npm run cdp:status    # see npm vs local
+npm run cdp:npm       # restore registry installs
+```
+
+Metro auto-detects the symlinks (watch + resolve). After switching, restart Metro (`npx expo start --clear`) and rebuild native if `cdp-app-attest` changed (`npx expo run:ios`). `npm install` / `npm ci` wipe the symlinks — re-run `cdp:local` afterward.
+
 ## Main User Sequence
 <img width="3810" height="4043" alt="Onramp Mobile V2 Demo Sequence Diagram" src="https://github.com/user-attachments/assets/662f491f-e557-4774-acb0-d6ec5157542c" />
 
