@@ -1,3 +1,4 @@
+import { handleOnrampReturn } from "@coinbase/cdp-react-native";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo } from "react";
@@ -5,15 +6,16 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { COLORS } from "../constants/Colors";
 
 /**
- * Dummy landing screen for onramp redirectUrl deep link testing.
+ * Landing screen for onramp redirectUrl deep links.
  *
  * When the Coinbase onramp widget / app2app flow completes it redirects to
  * onrampdemo://onramp-return (or the https Universal Link equivalent set as
  * redirectUrl in the session payload). iOS opens this screen via the deep
  * link scheme / associated domain registered in app.config.ts.
  *
- * This is a test screen — swap out the body once you know what data
- * Coinbase appends to the redirect URL (e.g. transaction ID, status).
+ * Calls {@link handleOnrampReturn} with the return URL so the SDK can run the
+ * post-redirect security handshake once the backend starts issuing nonces.
+ * Today that call is a no-op; keep it for forward compatibility.
  */
 export default function OnrampReturn() {
   const params = useLocalSearchParams();
@@ -50,6 +52,14 @@ export default function OnrampReturn() {
     console.log("🔗 [ONRAMP RETURN] query params:", queryParams);
     for (const [key, value] of Object.entries(queryParams)) {
       console.log(`🔗 [ONRAMP RETURN]   ${key}=${JSON.stringify(value)}`);
+    }
+
+    // Forward-compatible: no-op today; will finalize the session handshake
+    // when Coinbase embeds a nonce in the redirect URL.
+    if (url) {
+      handleOnrampReturn({ returnUrl: url }).catch((err) => {
+        console.error("🔗 [ONRAMP RETURN] handleOnrampReturn failed:", err);
+      });
     }
   }, [url, params, queryParams]);
 
