@@ -84,6 +84,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { COLORS } from '../../constants/Colors';
@@ -105,6 +106,8 @@ export type OnrampFormData = {
   paymentCurrency: string;
   phoneNumber?: string;
   agreementAcceptedAt?: string;
+  /** Optional App2App-only override; when set, used as destinationAddress instead of the wallet address. */
+  destinationAddressOverride?: string;
 };
 
 type OnrampFormProps = {
@@ -155,7 +158,8 @@ export function OnrampForm({
 
   const [asset, setAsset] = useState("USDC");
   const [network, setNetwork] = useState("Base");
-  const [paymentMethod, setPaymentMethod] = useState("GUEST_CHECKOUT_APPLE_PAY");
+  const [paymentMethod, setPaymentMethod] = useState("APP2APP_COINBASE");
+  const [destinationAddressOverride, setDestinationAddressOverride] = useState('');
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
   const [networkPickerVisible, setNetworkPickerVisible] = useState(false);
   const [paymentPickerVisible, setPaymentPickerVisible] = useState(false);
@@ -168,6 +172,7 @@ export function OnrampForm({
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
   const isGooglePay = paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
   const isGuestCheckout = isApplePay || isGooglePay;
+  const isApp2App = paymentMethod === 'APP2APP_COINBASE';
 
   // User limits state
   const [userLimits, setUserLimits] = useState<{ weekly: UserLimit; lifetime: UserLimit } | null>(null);
@@ -248,16 +253,30 @@ const usSubs = useMemo(() => {
   }, [amount]);
 
   const isAmountValid = Number.isFinite(amountNumber) && amountNumber > 0;
-  const isEvmAddressValid = /^0x[0-9a-fA-F]{40}$/.test(address);
-  const isSolanaAddressValid = (() => {
+
+  const isValidEvmAddress = (value: string) => /^0x[0-9a-fA-F]{40}$/.test(value);
+  const isValidSolanaAddress = (value: string) => {
     // Basic Solana address validation: 32-44 characters, base58 encoded
-    if (!address || address.length < 32 || address.length > 44) return false;
+    if (!value || value.length < 32 || value.length > 44) return false;
     // Check if it looks like base58 (no 0, O, I, l characters)
-    return /^[1-9A-HJ-NP-Za-km-z]+$/.test(address);
-  })();
+    return /^[1-9A-HJ-NP-Za-km-z]+$/.test(value);
+  };
+
+  const isEvmAddressValid = isValidEvmAddress(address);
+  const isSolanaAddressValid = isValidSolanaAddress(address);
 
   // Use local state as single source of truth for sandbox mode
   const isSandbox = localSandboxEnabled;
+
+  // App2App optional override — when present, funds go here instead of the app wallet.
+  const trimmedAddressOverride = destinationAddressOverride.trim();
+  const hasAddressOverride = isApp2App && trimmedAddressOverride.length > 0;
+  const isOverrideAddressValid = !hasAddressOverride
+    ? false
+    : isSandbox
+      ? true
+      : (isEvmNetwork ? isValidEvmAddress(trimmedAddressOverride) :
+         isSolanaNetwork ? isValidSolanaAddress(trimmedAddressOverride) : false);
 
   // Check if Smart Account is available for EVM networks (production only)
   // TestFlight reviewers use hardcoded address as their "smart account"
@@ -265,15 +284,19 @@ const usSubs = useMemo(() => {
   const smartAccount = isTestFlight
     ? TEST_ACCOUNTS.wallets.evm  // TestFlight: Use hardcoded address
     : (currentUser?.evmSmartAccounts?.[0] as string | undefined); // Real users: Use CDP Smart Account
-  const needsSmartAccount = !isSandbox && isEvmNetwork;
+  // Smart Account is only required when depositing to this app's wallet (not an App2App override).
+  const needsSmartAccount = !isSandbox && isEvmNetwork && !isOverrideAddressValid;
   const hasSmartAccount = !!smartAccount;
 
-  const hasValidAddress = isSandbox
+  const hasValidWalletAddress = isSandbox
     ? !!address && address.trim().length > 0  // In sandbox, just need any non-empty address
     : (isEvmNetwork ? isEvmAddressValid :
        isSolanaNetwork ? isSolanaAddressValid : false); // In production, need valid address for supported networks
 
-  // For production EVM networks, must have Smart Account
+  // App2App override alone is enough — no need for the app's own private key / wallet.
+  const hasValidAddress = isOverrideAddressValid || hasValidWalletAddress;
+
+  // For production EVM networks, must have Smart Account (unless using an App2App address override)
   const isFormValid = isAmountValid && !!network && !!asset && hasValidAddress && (!needsSmartAccount || hasSmartAccount);
 
   // User limits validation (Apple Pay + production mode)
@@ -330,12 +353,26 @@ const usSubs = useMemo(() => {
    */
 
   const availableNetworks = useMemo(() => {
-    if (!getAvailableNetworks) return ["ethereum", "base"]; // Fallback (shouldn't happen)
+    if (!getAvailableNetworks) {
+      // Mirror useOnramp FALLBACK_PURCHASE_CURRENCIES (shouldn't happen in practice)
+      return [
+        { name: "base", display_name: "Base", icon_url: null },
+        { name: "ethereum", display_name: "Ethereum", icon_url: null },
+        { name: "solana", display_name: "Solana", icon_url: null },
+      ];
+    }
     return getAvailableNetworks(asset);
   }, [asset, getAvailableNetworks]);
 
   const availableAssets = useMemo(() => {
-    if (!getAvailableAssets) return ["USDC", "ETH"]; // Fallback (shouldn't happen)
+    if (!getAvailableAssets) {
+      // Mirror useOnramp FALLBACK_PURCHASE_CURRENCIES (shouldn't happen in practice)
+      return [
+        { name: "USD Coin", symbol: "USDC", icon_url: null },
+        { name: "Ethereum", symbol: "ETH", icon_url: null },
+        { name: "Solana", symbol: "SOL", icon_url: null },
+      ];
+    }
     return getAvailableAssets(network);
   }, [network, getAvailableAssets]);
 
@@ -698,6 +735,7 @@ const usSubs = useMemo(() => {
     // localSandboxEnabled is the single source of truth
     console.log('🔍 [FORM SUBMIT] Submitting with sandbox =', localSandboxEnabled);
 
+    const trimmedOverride = destinationAddressOverride.trim();
     onSubmit({
       amount: amount,
       asset,
@@ -707,8 +745,11 @@ const usSubs = useMemo(() => {
       paymentCurrency,
       sandbox: localSandboxEnabled,
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
+      ...(isApp2App && trimmedOverride
+        ? { destinationAddressOverride: trimmedOverride }
+        : {}),
     });
-  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp]);
+  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp, destinationAddressOverride, isApp2App]);
   return (
     <ScrollView
       contentContainerStyle={styles.content}
@@ -866,6 +907,51 @@ const usSubs = useMemo(() => {
         </View>
       </View>
 
+      {/* App2App destination address override */}
+      {isApp2App && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Destination Address</Text>
+          <View style={styles.overrideInputRow}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={destinationAddressOverride}
+              onChangeText={setDestinationAddressOverride}
+              placeholder="Optional override"
+              placeholderTextColor={TEXT_SECONDARY}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {destinationAddressOverride ? (
+              <Pressable
+                style={styles.pasteButton}
+                onPress={() => setDestinationAddressOverride('')}
+              >
+                <Ionicons name="close-circle" size={20} color={TEXT_SECONDARY} />
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.pasteButton}
+                onPress={async () => {
+                  const text = await Clipboard.getStringAsync();
+                  if (text) setDestinationAddressOverride(text.trim());
+                }}
+              >
+                <Ionicons name="clipboard-outline" size={20} color={BLUE} />
+              </Pressable>
+            )}
+          </View>
+          <Text style={[styles.helper, hasAddressOverride && !isOverrideAddressValid && !isSandbox ? styles.errorText : null]}>
+            {hasAddressOverride && !isOverrideAddressValid && !isSandbox
+              ? `Enter a valid ${isEvmNetwork ? 'EVM (0x…)' : isSolanaNetwork ? 'Solana' : 'wallet'} address`
+              : hasAddressOverride
+                ? 'Using override as destination address'
+                : address
+                  ? `Default: ${address}`
+                  : 'Leave blank to use the wallet address generated in this app'}
+          </Text>
+        </View>
+      )}
+
   
       {/* Sandbox Toggle
       <View style={styles.switchRow}>
@@ -937,6 +1023,7 @@ const usSubs = useMemo(() => {
           </View>
           <Text style={styles.notificationText}>
             EVM onramp transactions require a Smart Account to receive funds. Your balances are stored in the Smart Account. Please ensure your Embedded Wallet is properly initialized.
+            {isApp2App ? ' Or enter a destination address override above.' : ''}
           </Text>
         </View>
       ) : !localSandboxEnabled && !hasValidAddress ? (
@@ -946,17 +1033,19 @@ const usSubs = useMemo(() => {
             <Text style={[styles.notificationTitle, { color: '#FF6B6B' }]}>Wallet Required</Text>
           </View>
           <Text style={styles.notificationText}>
-            Connect a valid {isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} address to continue
+            {hasAddressOverride && !isOverrideAddressValid
+              ? `Enter a valid ${isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} destination address override`
+              : `Connect a valid ${isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} address to continue${isApp2App ? ', or enter a destination address override above' : ''}`}
           </Text>
         </View>
-      ) : localSandboxEnabled && !address ? (
+      ) : localSandboxEnabled && !address && !isOverrideAddressValid ? (
         <View style={[styles.notificationCard, styles.errorCard]}>
           <View style={styles.notificationHeader}>
             <Ionicons name="alert-circle" size={20} color="#FF6B6B" />
             <Text style={[styles.notificationTitle, { color: '#FF6B6B' }]}>Address Required</Text>
           </View>
           <Text style={styles.notificationText}>
-            Enter a wallet address in Profile → Sandbox Wallet, or connect an Embedded Wallet to continue testing.
+            Enter a wallet address in Profile → Sandbox Wallet, connect an Embedded Wallet, or use the destination address override above.
           </Text>
         </View>
       ) : localSandboxEnabled ? (
@@ -1650,6 +1739,16 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     fontSize: 16,
     fontWeight: '400',
+  },
+  overrideInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pasteButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   inputDisabled: {
     opacity: 0.8,

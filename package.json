@@ -8,11 +8,17 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "cdp:local": "node tools/cdp-local.js local",
+    "cdp:npm": "node tools/cdp-local.js npm",
+    "cdp:status": "node tools/cdp-local.js status"
   },
   "dependencies": {
-    "@coinbase/cdp-core": "^0.0.58",
-    "@coinbase/cdp-hooks": "^0.0.58",
+    "@coinbase/cdp-api-client": "0.0.116",
+    "@coinbase/cdp-app-attest": "0.0.116",
+    "@coinbase/cdp-core": "0.0.116",
+    "@coinbase/cdp-hooks": "0.0.116",
+    "@coinbase/cdp-react-native": "0.0.116",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.3.10",
@@ -44,6 +50,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-device-info": "^10.3.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-get-random-values": "^1.11.0",
     "react-native-quick-crypto": "^0.7.17",

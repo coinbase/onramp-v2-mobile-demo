@@ -78,6 +78,42 @@ import { getCountry, getSandboxMode, getSubdivision, getVerifiedPhone, getVerifi
 
 
 export type PaymentMethodOption = { display: string; value: string };
+
+/**
+ * Offline fallback when buy-options can't be fetched (e.g. no backend).
+ * Shape matches the Coinbase buy-options API so display→API name helpers
+ * keep working: display_name "Ethereum" → name "ethereum", name "USD Coin" → symbol "USDC".
+ */
+const FALLBACK_PURCHASE_CURRENCIES = [
+  {
+    name: "USD Coin",
+    symbol: "USDC",
+    icon_url: null,
+    networks: [
+      { name: "base", display_name: "Base", icon_url: null },
+      { name: "ethereum", display_name: "Ethereum", icon_url: null },
+      { name: "solana", display_name: "Solana", icon_url: null },
+    ],
+  },
+  {
+    name: "Ethereum",
+    symbol: "ETH",
+    icon_url: null,
+    networks: [
+      { name: "ethereum", display_name: "Ethereum", icon_url: null },
+      { name: "base", display_name: "Base", icon_url: null },
+    ],
+  },
+  {
+    name: "Solana",
+    symbol: "SOL",
+    icon_url: null,
+    networks: [
+      { name: "solana", display_name: "Solana", icon_url: null },
+    ],
+  },
+];
+
 export function useOnramp() {
   const [guestCheckoutVisible, setGuestCheckoutVisible] = useState(false);
   const [activePaymentMethod, setActivePaymentMethod] = useState<string | null>(null);
@@ -104,21 +140,28 @@ export function useOnramp() {
      * - getAssetSymbolFromName(): "USD Coin" → "USDC" 
      * - getNetworkNameFromDisplayName(): "Base" → "base"
      */
+  const purchaseCurrencies = useMemo(
+    () => options?.purchase_currencies ?? FALLBACK_PURCHASE_CURRENCIES,
+    [options],
+  );
+
   const getAssetSymbolFromName = useCallback((assetName: string) => {
-    if (!options?.purchase_currencies) return assetName;
-    const asset = options.purchase_currencies.find((a: any) => a.name === assetName);
+    const asset = purchaseCurrencies.find(
+      (a: any) => a.name === assetName || a.symbol === assetName,
+    );
     return asset?.symbol || assetName;
-  }, [options]);
+  }, [purchaseCurrencies]);
 
   const getNetworkNameFromDisplayName = useCallback((displayName: string) => {
-    if (!options?.purchase_currencies) return displayName;
-    
-    for (const asset of options.purchase_currencies) {
-      const network = asset.networks.find((n: any) => n.display_name === displayName);
+    for (const asset of purchaseCurrencies) {
+      const network = asset.networks.find(
+        (n: any) => n.display_name === displayName || n.name === displayName,
+      );
       if (network) return network.name;
     }
-    return displayName;
-  }, [options]);
+    // Last resort: network API ids are lowercase (ethereum, base, solana).
+    return displayName.toLowerCase();
+  }, [purchaseCurrencies]);
 
   /**
    * Creates an onramp order and triggers Apple Pay flow
@@ -476,36 +519,31 @@ export function useOnramp() {
     }
   }, [getAssetSymbolFromName, getNetworkNameFromDisplayName]);
 
-  // Helper functions that use the stored options
+  // Helper functions that use live options when available, else the offline fallback.
   const getAvailableNetworks = useCallback((selectedAsset?: string) => {
-    if (!options?.purchase_currencies) return [
-      { name: "ethereum", display_name: "Ethereum", icon_url: null },
-      { name: "base", display_name: "Base", icon_url: null }
-    ];
-    
     if (!selectedAsset) {
-      const allNetworks = options.purchase_currencies.flatMap((asset: any) => asset.networks);
+      const allNetworks = purchaseCurrencies.flatMap((asset: any) => asset.networks);
       return [...new Map(allNetworks.map((net: any) => [net.name, net])).values()]; // Dedupe by name
     }
-    
-    const asset = options.purchase_currencies.find((a: any) => a.name === selectedAsset);
+
+    const asset = purchaseCurrencies.find(
+      (a: any) => a.name === selectedAsset || a.symbol === selectedAsset,
+    );
     return asset?.networks || [];
-  }, [options]);
+  }, [purchaseCurrencies]);
 
   const getAvailableAssets = useCallback((selectedNetwork?: string) => {
-    if (!options?.purchase_currencies) return [
-      { name: "USDC", symbol: "USDC", icon_url: null },
-      { name: "ETH", symbol: "ETH", icon_url: null }
-    ];
-    
     if (!selectedNetwork) {
-      return options.purchase_currencies; // Return full objects with icon_url
+      return purchaseCurrencies;
     }
-    
-    return options.purchase_currencies.filter((asset: any) => 
-      asset.networks.some((network: any) => network.display_name === selectedNetwork)
+
+    return purchaseCurrencies.filter((asset: any) =>
+      asset.networks.some(
+        (network: any) =>
+          network.display_name === selectedNetwork || network.name === selectedNetwork,
+      ),
     );
-  }, [options]);
+  }, [purchaseCurrencies]);
 
   const paymentCurrencies = useMemo(() => {
     const country = getCountry();
