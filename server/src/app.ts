@@ -587,14 +587,15 @@ app.post('/app2app/mobile/sessions', async (req, res) => {
  *
  *   A. POST /app2app/mobile/projects/:projectId/attestation/challenges
  *        → { challenge, expiresAt }  — one-time registration challenge.
- *   B. PUT  /app2app/mobile/projects/:projectId/attestation/registrations/:keyId
- *        → { appId, keyId, … }  — verifies the Apple attestation object signed
- *        over SHA-256(challenge) and stores the device public key.
+ *   B. POST /app2app/mobile/projects/:projectId/attestation/registrations
+ *        → { appId, keyId, … }  — verifies the Apple attestation object; keyId
+ *        lives in the JSON body only (App Attest keyIds are base64 and often
+ *        contain `/`, which breaks edge path routing).
+ *   B'. PUT /app2app/mobile/projects/:projectId/attestation/registrations/:keyId
+ *        — legacy path kept for older SDK clients during migration.
  *
- * Per onramp-service PR #1840 (cdp-api v1.41.0 strict handlers), projectId and
- * keyId are path parameters (projectId uuid-validated upstream) and registration
- * is a PUT keyed on keyId. Both are public/unauthenticated (trust comes from the
- * attestation itself), so we forward without a CDP JWT.
+ * Both are public/unauthenticated (trust comes from the attestation itself),
+ * so we forward without a CDP JWT.
  */
 
 // Step A — issue a one-time iOS App Attest registration challenge. projectId is
@@ -616,8 +617,31 @@ app.post('/app2app/mobile/projects/:projectId/attestation/challenges', async (re
   }
 });
 
-// Step B — verify the attestation object & register the device public key.
-// projectId and keyId are path params; the body carries { challenge, ios }.
+// Step B — primary registration (onramp-service PR #1906 / EGW #7599).
+// projectId is a path param; keyId is only in body.ios.keyId.
+app.post(
+  '/app2app/mobile/projects/:projectId/attestation/registrations',
+  async (req, res) => {
+    try {
+      const { projectId } = req.params;
+      const body = req.body ?? {};
+
+      await proxyOnrampMobile(
+        'registerOnrampAttestation',
+        `${onrampMobileBase()}/projects/${encodeURIComponent(projectId)}/attestation/registrations`,
+        body,
+        {},
+        res,
+        'POST',
+      );
+    } catch (error) {
+      console.error('❌ [APP2APP] attestation registration proxy error:', error);
+      res.status(502).json({ errorMessage: 'Failed to reach onramp attestation registration API' });
+    }
+  },
+);
+
+// Step B' — legacy PUT .../registrations/:keyId (older SDK clients).
 app.put(
   '/app2app/mobile/projects/:projectId/attestation/registrations/:keyId',
   async (req, res) => {
@@ -626,7 +650,7 @@ app.put(
       const body = req.body ?? {};
 
       await proxyOnrampMobile(
-        'registerOnrampAttestation',
+        'registerOnrampAttestationLegacy',
         `${onrampMobileBase()}/projects/${encodeURIComponent(projectId)}/attestation/registrations/${encodeURIComponent(keyId)}`,
         body,
         {},

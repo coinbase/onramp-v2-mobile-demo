@@ -3,8 +3,13 @@
  * useApp2App — APP-TO-APP ONRAMP ORCHESTRATION HOOK
  * ============================================================================
  *
- * Drives the full app-to-app onramp hand-off into the Coinbase retail app
- * using the @coinbase/cdp-react-native SDK. The SDK handles:
+ * Drives the full app-to-app onramp hand-off into the Coinbase retail app.
+ *
+ * AD HOC: uses `openCoinbaseOnrampPost` (local util) so device registration
+ * hits POST .../attestation/registrations (keyId in body) instead of the
+ * published SDK's legacy PUT .../registrations/{keyId}. Switch back to
+ * `openCoinbaseOnramp` from `@coinbase/cdp-react-native` once that SDK
+ * change ships.
  *
  *   Step 0 (once per install) — iOS device-key registration
  *   ─────────────────────────────────────────────────────────
@@ -22,9 +27,10 @@
  * ============================================================================
  */
 
-import { openCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { useCallback, useState } from "react";
+
+import { openCoinbaseOnrampPost } from "@/utils/openCoinbaseOnrampPost";
 
 /** Inputs for a single app2app onramp, supplied by the form/caller. */
 export interface StartApp2AppParams {
@@ -71,7 +77,7 @@ export function useApp2App() {
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * Runs the full app-to-app onramp flow via the CDP SDK.
+   * Runs the full app-to-app onramp flow (ad hoc POST registration).
    * Throws on failure; callers should catch and handle appropriately.
    */
   const startApp2App = useCallback(
@@ -79,7 +85,9 @@ export function useApp2App() {
       setIsProcessing(true);
       setError(null);
       try {
-        await openCoinbaseOnramp({
+        // AD HOC: POST registration. Revert to openCoinbaseOnramp from
+        // @coinbase/cdp-react-native once the SDK ships the same change.
+        await openCoinbaseOnrampPost({
           projectId: ONRAMP_PROJECT_ID,
           destinationAddress: params.destinationAddress,
           destinationNetwork: params.destinationNetwork,
