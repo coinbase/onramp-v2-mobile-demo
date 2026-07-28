@@ -91,16 +91,18 @@
  */
 
 import { useCurrentUser, useEvmAddress, useIsSignedIn, useSignOut, useSolanaAddress } from "@coinbase/cdp-hooks";
+import { canOpenCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import * as WebBrowser from 'expo-web-browser';
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { APIGuestCheckoutWidget, OnrampForm, useApp2App, useOnramp } from "../../components";
+import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { APIGuestCheckoutWidget, App2AppWebFallbackWebView, OnrampForm, useApp2App, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { CoinbaseAppStatus } from "../../components/ui/CoinbaseAppStatus";
 import { AppAttestReset } from "../../components/ui/AppAttestReset";
 import { COLORS } from "../../constants/Colors";
 import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
+import { useCoinbaseAppInstalled } from "../../hooks/useCoinbaseAppInstalled";
 import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
 import { createGuestCheckoutDebugInfo, openSupportEmail, SUPPORT_EMAIL } from "../../utils/supportEmail";
 
@@ -348,6 +350,36 @@ export default function Index() {
   } = useOnramp();
 
   const { startApp2App } = useApp2App();
+  const { isInstalled: isCoinbaseAppInstalled, state: coinbaseAppState } = useCoinbaseAppInstalled();
+
+  const [app2AppWebFallbackVisible, setApp2AppWebFallbackVisible] = useState(false);
+  const [app2AppWebFallbackUrl, setApp2AppWebFallbackUrl] = useState("");
+
+  const closeApp2AppWebFallback = useCallback(() => {
+    setApp2AppWebFallbackVisible(false);
+    setApp2AppWebFallbackUrl("");
+    setIsProcessingPayment(false);
+  }, [setIsProcessingPayment]);
+
+  const handleApp2AppWebFallbackComplete = useCallback(
+    (redirectUrl: string) => {
+      setApp2AppWebFallbackVisible(false);
+      setApp2AppWebFallbackUrl("");
+      setIsProcessingPayment(false);
+
+      try {
+        const redirected = new URL(redirectUrl);
+        const ref = redirected.searchParams.get("partnerUserRef");
+        router.push({
+          pathname: "/onramp-return" as any,
+          params: ref ? { partnerUserRef: ref } : {},
+        });
+      } catch {
+        router.push({ pathname: "/onramp-return" as any, params: {} });
+      }
+    },
+    [router, setIsProcessingPayment],
+  );
 
   // Refetch options is handled on screen focus and within OnrampForm when needed
 
@@ -541,21 +573,45 @@ export default function Index() {
         network: networkApiName
       });
 
-      // App-to-app: device-attested hand-off to the Coinbase retail app via the
-      // https://coinbase.com/onramp universal link. No phone/email verification —
-      // the iOS App Attest attestation is the trust anchor (see useApp2App).
-      // The SDK opens the Coinbase app when installed; otherwise falls back to
-      // the web onramp gracefully. Any error propagates to the catch block below.
+      // App-to-app: device-attested hand-off when Coinbase app is installed.
+      // iOS without Coinbase app: authed widget session in an in-app WebView
+      // (COM2-3599 / COM2-3535) — no App Attest. Android without app: iOS-only message.
       if ((formData.paymentMethod || '').toUpperCase() === 'APP2APP_COINBASE') {
-        await startApp2App({
-          purchaseCurrency: assetApiName,
-          destinationNetwork: networkApiName,
-          destinationAddress: targetAddress,
-          paymentAmount: updatedFormData.amount,
-          paymentCurrency: updatedFormData.paymentCurrency || 'USD',
-        });
+        const coinbaseOnrampAvailable =
+          coinbaseAppState === "unknown"
+            ? await canOpenCoinbaseOnramp()
+            : isCoinbaseAppInstalled;
+
+        if (coinbaseOnrampAvailable) {
+          await startApp2App({
+            purchaseCurrency: assetApiName,
+            destinationNetwork: networkApiName,
+            destinationAddress: targetAddress,
+            paymentAmount: updatedFormData.amount,
+            paymentCurrency: updatedFormData.paymentCurrency || 'USD',
+          });
+          setIsProcessingPayment(false);
+          return;
+        }
+
+        if (Platform.OS === "ios") {
+          const url = await createWidgetSession(updatedFormData);
+          if (url) {
+            setApp2AppWebFallbackUrl(url);
+            setApp2AppWebFallbackVisible(true);
+          }
+          return;
+        }
+
         setIsProcessingPayment(false);
-        return; // do not call createOrder()
+        setApplePayAlert({
+          visible: true,
+          title: "Coinbase App Required",
+          message:
+            "App-to-app onramp requires the Coinbase app on Android. Install the Coinbase app, or switch to Coinbase Widget.\n\nIn-app WebView fallback is iOS-only in this demo.",
+          type: "info",
+        });
+        return;
       }
 
       // Coinbase Widget: skip phone/email verification
@@ -769,7 +825,7 @@ export default function Index() {
       console.error('Error submitting form:', error);
       setIsProcessingPayment(false);
     }
-  }, [createOrder, createWidgetSession, startApp2App, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction]);
+  }, [createOrder, createWidgetSession, startApp2App, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction, isCoinbaseAppInstalled, coinbaseAppState]);
     
   
   return (
@@ -844,6 +900,14 @@ export default function Index() {
           }}
         />
       )}
+
+      {/* iOS App2App web fallback — authed widget in partner WebView (COM2-3599) */}
+      <App2AppWebFallbackWebView
+        visible={app2AppWebFallbackVisible}
+        url={app2AppWebFallbackUrl}
+        onClose={closeApp2AppWebFallback}
+        onComplete={handleApp2AppWebFallbackComplete}
+      />
       {/* OnrampForm Alert - Wallet Connection (Always Success) */}
       <CoinbaseAlert
         visible={showAlert}
