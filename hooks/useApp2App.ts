@@ -9,22 +9,30 @@
  *   Step 0 (once per install) — iOS device-key registration
  *   ─────────────────────────────────────────────────────────
  *   Ensures the device's App Attest key is registered with the CDP onramp
- *   backend. No-op on subsequent calls once registered.
+ *   backend. No-op on subsequent calls once registered. Android skips this
+ *   step — Play Integrity tokens are minted per request (no key registration).
  *
  *   Steps 1–4 (every call) — per-transaction handoff
  *   ───────────────────────────────────────────────────
  *   1. Creates a per-transaction challenge bound to the order parameters.
- *   2. Signs the challenge with the registered device key (iOS App Attest).
- *   3. Exchanges the assertion for an onramp session token.
- *   4. Opens https://www.coinbase.com/onramp?sessionToken=… via Universal
- *      Link. If the Coinbase app is installed, iOS routes directly into the
- *      app; otherwise the OS falls back to the web onramp.
+ *   2. Proves device integrity:
+ *        iOS     — App Attest assertion over the challenge
+ *        Android — Play Integrity token (requestHash derived from sessionToken;
+ *                  see COM2-3685)
+ *   3. Exchanges the proof for an onramp session / redirect URL.
+ *   4. Opens the Coinbase onramp hand-off URL. When the Coinbase app is
+ *      installed, the OS routes into retail; otherwise iOS may fall back to
+ *      the web onramp.
+ *
+ * Requires a published SDK build with Android Play Integrity support
+ * (COM2-3685). Until that lands, openCoinbaseOnramp throws on Android.
  * ============================================================================
  */
 
 import { openCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { useCallback, useState } from "react";
+import { getSandboxMode } from "../utils/sharedState";
 
 /** Inputs for a single app2app onramp, supplied by the form/caller. */
 export interface StartApp2AppParams {
@@ -38,11 +46,12 @@ export interface StartApp2AppParams {
 // Return target the Coinbase app redirects to when the onramp completes.
 //
 // This must be (a) a host in the CDP project's redirect domain allowlist and
-// (b) a domain whose AASA points back at this app (ios.associatedDomains) so
-// the Universal Link re-opens us. Resolution order:
+// (b) a domain whose AASA / Digital Asset Links point back at this app
+// (ios.associatedDomains / android.intentFilters) so the OS re-opens us.
+// Resolution order:
 //   1. EXPO_PUBLIC_APP2APP_REDIRECT_URL — explicit override.
 //   2. https origin of EXPO_PUBLIC_BASE_URL — when the API base IS the app domain.
-//   3. custom scheme — local/non-https backends where Universal Links don't apply.
+//   3. custom scheme — local/non-https backends where App Links don't apply.
 function computeRedirectUrl(): string {
   const override = process.env.EXPO_PUBLIC_APP2APP_REDIRECT_URL;
   if (override) return override;
@@ -79,6 +88,13 @@ export function useApp2App() {
       setIsProcessing(true);
       setError(null);
       try {
+        // Sandbox dry-run: prefix partnerUserRef the same way guest-checkout /
+        // widget paths do so App2App sessions stay consistent across platforms.
+        const userId = currentUser?.userId;
+        const partnerUserRef = userId
+          ? `${getSandboxMode() ? "sandbox-" : ""}${userId}`
+          : undefined;
+
         await openCoinbaseOnramp({
           projectId: ONRAMP_PROJECT_ID,
           destinationAddress: params.destinationAddress,
@@ -87,7 +103,7 @@ export function useApp2App() {
           paymentAmount: params.paymentAmount,
           paymentCurrency: params.paymentCurrency,
           redirectUrl: REDIRECT_URL,
-          partnerUserRef: currentUser?.userId,
+          partnerUserRef,
         });
       } catch (e: any) {
         console.error('❌ [APP2APP] Flow failed:', e);

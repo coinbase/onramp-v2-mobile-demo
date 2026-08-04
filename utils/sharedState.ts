@@ -157,7 +157,8 @@ export const markPhoneVerifyCanceled = () => { phoneVerifyCanceled = true; };
 export const getPhoneVerifyWasCanceled = () => phoneVerifyCanceled;
 export const clearPhoneVerifyWasCanceled = () => { phoneVerifyCanceled = false; };
 
-// Sandbox mode - defaults to OFF (App2App does not support sandbox)
+// Sandbox mode - defaults to OFF. When enabled, App2App (and guest checkout)
+// prefixes partnerUserRef with "sandbox-" for dry-run sessions.
 // Does NOT persist across app restarts - intentional design
 let sandboxMode: boolean = false;
 
@@ -167,7 +168,7 @@ export const setSandboxMode = (enabled: boolean) => {
   console.log('Sandbox mode:', enabled ? 'ENABLED' : 'DISABLED');
 };
 
-// Initialize sandbox mode - starts as OFF (App2App does not support sandbox)
+// Initialize sandbox mode - starts as OFF
 export const hydrateSandboxMode = async () => {
   sandboxMode = false;
   console.log('ℹ️ Sandbox mode initialized to default: DISABLED');

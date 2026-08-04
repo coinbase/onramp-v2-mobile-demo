@@ -11,8 +11,13 @@
  * onramp scheme is only registered by Coinbase app versions that correctly
  * handle the CDP session token. Older versions silently show an error screen.
  *
- * iOS requirement: `com.coinbase.cdp.onramp` must be listed under
- * `LSApplicationQueriesSchemes` in the app's Info.plist (see app.config.ts).
+ * Platform requirements:
+ *   iOS — `com.coinbase.cdp.onramp` under `LSApplicationQueriesSchemes`
+ *         (see app.config.ts).
+ *   Android — `<queries>` for the CDP onramp scheme / Coinbase package
+ *         (see plugins/withApp2AppAndroid.js). Once the SDK enables Android
+ *         `canOpenCoinbaseOnramp` (COM2-3685), this probe reflects install
+ *         state; until then the SDK may report unavailable on Android.
  *
  * The check re-runs whenever the app returns to the foreground so the UI
  * stays accurate if the user installs/removes Coinbase while backgrounded.

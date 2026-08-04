@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/app2app/(.*)", "destination": "/api/app2app" },
-    { "source": "/.well-known/apple-app-site-association", "destination": "/api/aasa" }
+    { "source": "/.well-known/apple-app-site-association", "destination": "/api/aasa" },
+    { "source": "/.well-known/assetlinks.json", "destination": "/api/assetlinks" }
   ]
 }

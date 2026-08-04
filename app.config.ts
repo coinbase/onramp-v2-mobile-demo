@@ -3,6 +3,10 @@ import { ExpoConfig } from "expo/config";
 
 const withGooglePayWebView = require("./plugins/withGooglePayWebView");
 const withCdpAppAttest = require("./plugins/withCdpAppAttest");
+const withApp2AppAndroid = require("./plugins/withApp2AppAndroid");
+
+/** Host used for iOS Universal Links / Android App Links return deep links. */
+const APP_LINK_HOST = "onramp-v2-mobile-demo-murex.vercel.app";
 
 const config: ExpoConfig = {
   name: "Onramp V2 Demo",
@@ -48,7 +52,7 @@ const config: ExpoConfig = {
     // allowlisted paths) open this app directly. The host must serve the AASA
     // file at /.well-known/apple-app-site-association (see server/api/aasa.js).
     // No protocol prefix here — Apple expects just `applinks:<host>`.
-    associatedDomains: ["applinks:onramp-v2-mobile-demo-murex.vercel.app"],
+    associatedDomains: [`applinks:${APP_LINK_HOST}`],
   },
 
   android: {
@@ -57,7 +61,26 @@ const config: ExpoConfig = {
       backgroundColor: "#ffffff",
     },
     edgeToEdgeEnabled: true,
+    // Must match the Android package allowlisted on the CDP project for
+    // App2App Play Integrity (portal registration — COM2-3687).
     package: "com.coinbase.cdp_onramp",
+    // Android App Links: reopen this demo from https://<host>/onramp-return
+    // after Coinbase retail completes App2App. Host must serve Digital Asset
+    // Links at /.well-known/assetlinks.json (see server/api/assetlinks.js).
+    intentFilters: [
+      {
+        action: "VIEW",
+        autoVerify: true,
+        category: ["BROWSABLE", "DEFAULT"],
+        data: [
+          {
+            scheme: "https",
+            host: APP_LINK_HOST,
+            pathPrefix: "/onramp-return",
+          },
+        ],
+      },
+    ],
   },
 
   web: {
@@ -89,6 +112,7 @@ const config: ExpoConfig = {
     ],
     withGooglePayWebView,
     withCdpAppAttest,
+    withApp2AppAndroid,
   ],
 
   experiments: { typedRoutes: true },

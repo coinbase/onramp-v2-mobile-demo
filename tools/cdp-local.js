@@ -93,7 +93,8 @@ function linkLocal() {
   console.log(
     '\nLocal CDP packages active. Restart Metro, then rebuild native if needed:\n' +
       '  npx expo start --clear\n' +
-      '  npx expo run:ios   # when cdp-app-attest native code changed\n'
+      '  npx expo run:ios       # when cdp-app-attest iOS native code changed\n' +
+      '  npx expo run:android   # when Play Integrity / Android native code changed\n'
   );
 }
 
@@ -122,7 +123,8 @@ function linkNpm() {
   console.log(
     '\nNPM CDP packages restored. Restart Metro, then rebuild native if needed:\n' +
       '  npx expo start --clear\n' +
-      '  npx expo run:ios\n'
+      '  npx expo run:ios\n' +
+      '  npx expo run:android\n'
   );
 }
 
