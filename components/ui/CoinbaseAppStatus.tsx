@@ -9,8 +9,8 @@
  * ============================================================================
  */
 
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useMemo } from "react";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { COLORS } from "../../constants/Colors";
 import {
   CoinbaseAppInstallState,
@@ -19,30 +19,40 @@ import {
 
 const { CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY } = COLORS;
 
-const STATUS_DETAILS: Record<
-  CoinbaseAppInstallState,
-  { dotColor: string; label: string; hint: string }
-> = {
-  unknown: {
-    dotColor: "#B8C9C8",
-    label: "Checking for Coinbase app…",
-    hint: "Detecting whether the Coinbase retail app is installed.",
-  },
-  installed: {
-    dotColor: "#4ADE80",
-    label: "Coinbase app installed",
-    hint: "App-to-app hand-off is available on this device.",
-  },
-  "not-installed": {
-    dotColor: "#FF7800",
-    label: "Coinbase app not installed",
-    hint: "Falls back to the web onramp flow.",
-  },
-};
+function statusDetails(
+  state: CoinbaseAppInstallState,
+): { dotColor: string; label: string; hint: string } {
+  switch (state) {
+    case "unknown":
+      return {
+        dotColor: "#B8C9C8",
+        label: "Checking for Coinbase app…",
+        hint: "Detecting whether the Coinbase retail app supports App2App.",
+      };
+    case "installed":
+      return {
+        dotColor: "#4ADE80",
+        label: "Coinbase app installed",
+        hint:
+          Platform.OS === "android"
+            ? "App-to-app hand-off is available (Play Integrity)."
+            : "App-to-app hand-off is available (App Attest).",
+      };
+    case "not-installed":
+      return {
+        dotColor: "#FF7800",
+        label: "Coinbase app not installed",
+        hint:
+          Platform.OS === "android"
+            ? "Install the Coinbase app for App2App (Play Integrity), or use Coinbase Widget."
+            : "Falls back to the web onramp flow when App2App opens the Universal Link.",
+      };
+  }
+}
 
 export function CoinbaseAppStatus() {
   const { state } = useCoinbaseAppInstalled();
-  const { dotColor, label, hint } = STATUS_DETAILS[state];
+  const { dotColor, label, hint } = useMemo(() => statusDetails(state), [state]);
 
   return (
     <View style={styles.container} accessibilityRole="text">

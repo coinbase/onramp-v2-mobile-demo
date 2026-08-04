@@ -259,6 +259,38 @@ open ios/OnrampV2Demo.xcworkspace
   error, and the Home screen has a **"Reset device attestation"** button to force
   a fresh key manually.
 
+## Building for Android (App2App + Play Integrity)
+
+Android App2App uses the same demo entry point as iOS (`useApp2App` →
+`openCoinbaseOnramp` from `@coinbase/cdp-react-native`). Play Integrity support
+in the SDK is tracked by **COM2-3685**; until that SDK build is published, the
+call throws on Android even though this demo is wired for the shared API shape.
+
+### Android package / portal registration
+
+| Item | Value |
+|------|--------|
+| Application id | `com.coinbase.cdp_onramp` (`app.config.ts` → `android.package`) |
+| Return path | `https://onramp-v2-mobile-demo-murex.vercel.app/onramp-return` (or `onrampdemo://onramp-return`) |
+| App Links | `android.intentFilters` + `/.well-known/assetlinks.json` (`server/api/assetlinks.js`) |
+| Package visibility | `plugins/withApp2AppAndroid.js` (`<queries>` for CDP onramp scheme) |
+
+Register `com.coinbase.cdp_onramp` (and its Play Integrity Google Cloud project
+number) on the CDP project via the portal — that allowlist work is **COM2-3687**.
+Fill `sha256_cert_fingerprints` in `server/api/assetlinks.js` with the signing
+cert(s) used for your Android builds before relying on verified App Links.
+
+### Native Android build
+
+```bash
+# Same .env rules as iOS — EXPO_PUBLIC_USE_EXPO_CRYPTO=false for real attestation
+npx expo prebuild -p android
+npx expo run:android
+```
+
+Sandbox mode prefixes `partnerUserRef` with `sandbox-` for App2App the same way
+guest-checkout / widget dry-runs do on iOS.
+
 ## Using the App
 
 ### First Time Setup
@@ -450,11 +482,14 @@ Check Expo logs:
 |----------|-------------|
 | `EXPO_PUBLIC_CDP_PROJECT_ID` | Your CDP project ID (embedded wallet / sign-in) |
 | `EXPO_PUBLIC_BASE_URL` | Backend server URL. For Vercel it must end in `/api`; for a local server use `http://localhost:3000` |
-| `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go (`npx expo start`); **`false`** for dev/native/TestFlight builds (`npx expo run:ios`, archives). Must be `false` for app2app/App Attest to work |
+| `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go (`npx expo start`); **`false`** for native builds (`npx expo run:ios\|android`, archives). Must be `false` for app2app / App Attest / Play Integrity |
 | `EXPO_PUBLIC_ONRAMP_PROJECT_ID` | CDP project that owns the app2app onramp integration (attestation + onramp-mobile endpoints). Defaults to `EXPO_PUBLIC_CDP_PROJECT_ID` |
-| `EXPO_PUBLIC_APP_ATTEST_APP_ID` | iOS App Attest App ID in `teamID.bundleID` form; must match the build's signing team + bundle id and be allowlisted in the CDP project (required for app2app) |
-| `EXPO_PUBLIC_APP2APP_VERBOSE` | Optional. `1` enables step-by-step app2app / App Attest debug logs on device |
+| `EXPO_PUBLIC_APP_ATTEST_APP_ID` | iOS App Attest App ID in `teamID.bundleID` form; must match the build's signing team + bundle id and be allowlisted in the CDP project (required for iOS app2app) |
+| `EXPO_PUBLIC_APP2APP_VERBOSE` | Optional. `1` enables step-by-step app2app / attestation debug logs on device |
 | `IOS_BUILD_NUMBER` | iOS build number (`CFBundleVersion`); bump for every TestFlight/App Store upload |
+
+Android package name is **not** an env var — it is `com.coinbase.cdp_onramp` in
+`app.config.ts` and must be allowlisted on the CDP project (COM2-3687).
 
 ### Required (Server `.env`)
 

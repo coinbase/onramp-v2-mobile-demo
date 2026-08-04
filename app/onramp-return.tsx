@@ -9,9 +9,10 @@ import { COLORS } from "../constants/Colors";
  * Landing screen for onramp redirectUrl deep links.
  *
  * When the Coinbase onramp widget / app2app flow completes it redirects to
- * onrampdemo://onramp-return (or the https Universal Link equivalent set as
- * redirectUrl in the session payload). iOS opens this screen via the deep
- * link scheme / associated domain registered in app.config.ts.
+ * onrampdemo://onramp-return (or the https App Link / Universal Link set as
+ * redirectUrl in the session payload). The OS opens this screen via the deep
+ * link scheme, iOS associated domain, or Android intent filter registered in
+ * app.config.ts.
  *
  * Calls {@link handleOnrampReturn} with the return URL so the SDK can run the
  * post-redirect security handshake once the backend starts issuing nonces.

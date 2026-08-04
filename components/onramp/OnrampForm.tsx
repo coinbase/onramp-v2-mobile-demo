@@ -786,6 +786,11 @@ const usSubs = useMemo(() => {
             sandbox- prefix + auto-confirm modal
           </Text>
         )}
+        {localSandboxEnabled && isApp2App && (
+          <Text style={[styles.helper, { marginTop: 4 }]}>
+            sandbox- partnerUserRef for App2App dry-run (iOS / Android)
+          </Text>
+        )}
       </View>
 
       {/* Buy Card */}
