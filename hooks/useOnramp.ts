@@ -362,10 +362,15 @@ export function useOnramp() {
       const isSolanaNetwork = networkName.toLowerCase().includes('solana');
       const isSandbox = getSandboxMode();
 
-      let destinationAddress = formData.address;
+      const addressOverride =
+        typeof formData.destinationAddressOverride === 'string'
+          ? formData.destinationAddressOverride.trim()
+          : '';
+      let destinationAddress = addressOverride || formData.address;
 
       console.log('🎯 [WIDGET SESSION] Address before processing:', {
         formDataAddress: formData.address,
+        addressOverride: addressOverride || undefined,
         network: networkName,
         isEvmNetwork,
         isSolanaNetwork,
@@ -374,7 +379,10 @@ export function useOnramp() {
         currentUserEvm: currentUser?.evmSmartAccounts?.[0]
       });
 
-      if (!isSandbox && isEvmNetwork) {
+      // App2App destination override (incl. iOS web fallback) wins over Embedded Wallet.
+      if (addressOverride) {
+        console.log('🎯 [WIDGET SESSION] Using destination address override:', addressOverride);
+      } else if (!isSandbox && isEvmNetwork) {
         // TestFlight reviewers use hardcoded address as their "smart account"
         const isTestFlight = isTestSessionActive();
         const smartAccount = isTestFlight

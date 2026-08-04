@@ -12,6 +12,7 @@ export { SwipeToConfirm } from './ui/SwipeToConfirm';
 
 // Onramp Components
 export { APIGuestCheckoutWidget } from './onramp/APIGuestCheckoutWidget';
+export { App2AppWebFallbackWebView } from './onramp/App2AppWebFallbackWebView';
 export { OnrampForm } from './onramp/OnrampForm';
 
 // Hooks

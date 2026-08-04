@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { COLORS } from "../../constants/Colors";
 import {
   CoinbaseAppInstallState,
@@ -36,7 +36,10 @@ const STATUS_DETAILS: Record<
   "not-installed": {
     dotColor: "#FF7800",
     label: "Coinbase app not installed",
-    hint: "Falls back to the web onramp flow.",
+    hint:
+      Platform.OS === "ios"
+        ? "App2App opens an in-app WebView with an authed onramp session (no App Attest)."
+        : "Install the Coinbase app for App2App, or use Coinbase Widget. In-app WebView fallback is iOS-only in this demo.",
   },
 };
 
