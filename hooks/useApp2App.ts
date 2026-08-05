@@ -26,6 +26,8 @@ import { openCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { useCallback, useState } from "react";
 
+import { getSandboxMode, setCurrentPartnerUserRef } from "../utils/sharedState";
+
 /** Inputs for a single app2app onramp, supplied by the form/caller. */
 export interface StartApp2AppParams {
   purchaseCurrency: string;     // e.g. "USDC"
@@ -73,12 +75,29 @@ export function useApp2App() {
   /**
    * Runs the full app-to-app onramp flow via the CDP SDK.
    * Throws on failure; callers should catch and handle appropriately.
+   *
+   * When Sandbox Mode is on, partnerUserRef is prefixed with `sandbox-` so
+   * ValidateOnrampSession returns dryRun=true and Retail skips real commit.
    */
   const startApp2App = useCallback(
     async (params: StartApp2AppParams): Promise<void> => {
       setIsProcessing(true);
       setError(null);
       try {
+        const isSandbox = getSandboxMode();
+        const userId = currentUser?.userId;
+        const partnerUserRef = userId
+          ? `${isSandbox ? "sandbox-" : ""}${userId}`
+          : undefined;
+
+        console.log("📱 [APP2APP] Starting onramp", {
+          sandbox: isSandbox,
+          partnerUserRef,
+        });
+        if (partnerUserRef) {
+          setCurrentPartnerUserRef(partnerUserRef);
+        }
+
         await openCoinbaseOnramp({
           projectId: ONRAMP_PROJECT_ID,
           destinationAddress: params.destinationAddress,
@@ -87,7 +106,7 @@ export function useApp2App() {
           paymentAmount: params.paymentAmount,
           paymentCurrency: params.paymentCurrency,
           redirectUrl: REDIRECT_URL,
-          partnerUserRef: currentUser?.userId,
+          partnerUserRef,
         });
       } catch (e: any) {
         console.error('❌ [APP2APP] Flow failed:', e);
