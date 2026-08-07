@@ -302,6 +302,9 @@ Test without real transactions:
    - Any wallet address override accepted
    - No real blockchain transactions
    - Email verification still required for server authentication
+   - **App2App**: `partnerUserRef` is prefixed with `sandbox-`, so Retail
+     shows a test-mode banner, skips buy/send commit, and redirects back with
+     `status=success&transactionId=dry_run_<uuid>`
 
 > **Note**: Sandbox mode auto-resets on app restart for safety.
 
