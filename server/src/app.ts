@@ -83,6 +83,18 @@ const webhookRateLimiter = rateLimit({
   }
 });
 
+// Embedded Order requests call an authenticated, server-signed upstream API.
+// Limit each authenticated user independently so quote refreshes remain usable
+// without allowing a single device to exhaust backend or CDP capacity.
+const embeddedOrderRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Too many Embedded Order requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.userId || req.ip || 'unknown',
+});
+
 // CORS Configuration - Prevent random websites from calling your API
 // Note: This does NOT affect:
 // - Mobile apps (React Native) - they don't send Origin header
@@ -326,7 +338,7 @@ async function storeEmbeddedAuthToken(key: string, token: string): Promise<void>
  * client contact/OTP/agreement fields never select the classic guest path.
  * The server derives partnerUserRef and owns userAuthToken replay/storage.
  */
-app.post('/onramp/order/embedded', async (req, res) => {
+app.post('/onramp/order/embedded', embeddedOrderRateLimiter, async (req, res) => {
   try {
     const parsed = embeddedOrderInputSchema.safeParse(req.body);
     if (!parsed.success) {
