@@ -72,6 +72,7 @@ import { useCallback, useMemo, useState } from "react";
 import { OnrampFormData } from "../components/onramp/OnrampForm";
 import { TEST_ACCOUNTS } from "../constants/TestAccounts";
 import { createGuestCheckoutOrder } from "../utils/createGuestCheckoutOrder";
+import { createEmbeddedOrder as requestEmbeddedOrder } from "../utils/createEmbeddedOrder";
 import { fetchBuyOptions } from "../utils/fetchBuyOptions";
 import { fetchBuyQuote } from "../utils/fetchBuyQuote";
 import { getCountry, getSandboxMode, getSubdivision, getVerifiedPhone, getVerifiedPhoneAt, isPhoneFresh60d, isTestSessionActive, setCurrentPartnerUserRef, setSubdivision } from "../utils/sharedState";
@@ -116,6 +117,7 @@ const FALLBACK_PURCHASE_CURRENCIES = [
 
 export function useOnramp() {
   const [guestCheckoutVisible, setGuestCheckoutVisible] = useState(false);
+  const [embeddedOrderVisible, setEmbeddedOrderVisible] = useState(false);
   const [activePaymentMethod, setActivePaymentMethod] = useState<string | null>(null);
   const [hostedUrl, setHostedUrl] = useState('');
   const [transactionStatus, setTransactionStatus] = useState<'pending' | 'success' | 'error' | null>(null);
@@ -269,9 +271,10 @@ export function useOnramp() {
       const isEvmNetwork = ['base', 'ethereum', 'polygon', 'arbitrum', 'optimism', 'avalanche', 'linea', 'zksync'].includes(networkName.toLowerCase());
       const isSandbox = getSandboxMode();
 
-      let destinationAddress = formData.address;
+      const addressOverride = formData.destinationAddressOverride?.trim();
+      let destinationAddress = addressOverride || formData.address;
 
-      if (!isSandbox && isEvmNetwork) {
+      if (!isSandbox && isEvmNetwork && !addressOverride) {
         // TestFlight reviewers use hardcoded address as their "smart account"
         const isTestFlight = isTestSessionActive();
         const smartAccount = isTestFlight
@@ -322,6 +325,41 @@ export function useOnramp() {
       throw error;
     }
   }, [getAssetSymbolFromName, getNetworkNameFromDisplayName, currentUser]);
+
+  /**
+   * Embedded Orders intentionally omit contact and agreement fields. Coinbase
+   * collects them in the hosted WebView; the backend owns userAuthToken reuse.
+   */
+  const createEmbeddedOrder = useCallback(async (formData: OnrampFormData) => {
+    setIsProcessingPayment(true);
+    try {
+      const destinationAddress = formData.destinationAddressOverride?.trim() || formData.address;
+      if (!destinationAddress) throw new Error("A destination wallet address is required for an embedded order.");
+
+      const result = await requestEmbeddedOrder({
+        paymentAmount: formData.amount,
+        paymentCurrency: formData.paymentCurrency,
+        purchaseCurrency: getAssetSymbolFromName(formData.asset),
+        destinationNetwork: getNetworkNameFromDisplayName(formData.network),
+        destinationAddress,
+        sandbox: formData.sandbox,
+        isQuote: false,
+      });
+
+      if (!result.hostedUrl) throw new Error("No embedded order payment URL received");
+
+      // This is UI state only. The server derives the authoritative reference
+      // and never accepts one supplied by the device.
+      const userId = currentUser?.userId || "unknown-user";
+      setCurrentPartnerUserRef(`${formData.sandbox ? "sandbox-" : ""}${userId}`);
+      setIsSandboxOrder(formData.sandbox);
+      setHostedUrl(result.hostedUrl);
+      setEmbeddedOrderVisible(true);
+    } catch (error) {
+      setIsProcessingPayment(false);
+      throw error;
+    }
+  }, [currentUser, getAssetSymbolFromName, getNetworkNameFromDisplayName]);
 
   const createWidgetSession = useCallback(async (formData: OnrampFormData) => {
     setIsProcessingPayment(true);
@@ -441,6 +479,14 @@ export function useOnramp() {
     }
   }, [getAssetSymbolFromName, getNetworkNameFromDisplayName, setIsProcessingPayment]);
 
+  const closeEmbeddedOrder = useCallback(() => {
+    setEmbeddedOrderVisible(false);
+    setHostedUrl('');
+    setIsProcessingPayment(false);
+    setTransactionStatus(null);
+    setIsSandboxOrder(false);
+  }, []);
+
   const closeGuestCheckout = useCallback(() => {
     setGuestCheckoutVisible(false);
     setActivePaymentMethod(null);
@@ -497,6 +543,8 @@ export function useOnramp() {
     network: string;
     paymentCurrency: string;
     paymentMethod?: string;
+    destinationAddress?: string;
+    sandbox?: boolean;
   }) => {
     const amt = Number.parseFloat(formData?.amount as any);
     if (!formData.amount || !formData.asset || !formData.network || !Number.isFinite(amt) || amt <= 0) {
@@ -509,14 +557,45 @@ export function useOnramp() {
       const assetSymbol = getAssetSymbolFromName(formData.asset);
       const networkName = getNetworkNameFromDisplayName(formData.network);
 
-      // Auth handled by authenticatedFetch
-      const quote = await fetchBuyQuote({
-        paymentAmount: formData.amount,
-        paymentCurrency: formData.paymentCurrency,
-        purchaseCurrency: assetSymbol,
-        destinationNetwork: networkName,
-        paymentMethod: formData.paymentMethod || 'COINBASE_WIDGET',
-      });
+      let quote: any;
+      if (formData.paymentMethod === 'EMBEDDED_ORDER') {
+        const destinationAddress = formData.destinationAddress?.trim();
+        if (!destinationAddress) {
+          setCurrentQuote(null);
+          return;
+        }
+        const response = await requestEmbeddedOrder({
+          paymentAmount: formData.amount,
+          paymentCurrency: formData.paymentCurrency,
+          purchaseCurrency: assetSymbol,
+          destinationNetwork: networkName,
+          destinationAddress,
+          sandbox: Boolean(formData.sandbox),
+          isQuote: true,
+        });
+        const order = response?.order ?? response;
+        const fees = order?.fees || [];
+        const coinbaseFee = fees.find((fee: any) => fee.type === 'FEE_TYPE_EXCHANGE');
+        const networkFee = fees.find((fee: any) => fee.type === 'FEE_TYPE_NETWORK');
+        quote = {
+          purchase_amount: { value: order?.purchaseAmount ?? '0', currency: order?.purchaseCurrency },
+          payment_subtotal: { value: order?.paymentSubtotal ?? '0', currency: order?.paymentCurrency },
+          payment_total: { value: order?.paymentTotal ?? '0', currency: order?.paymentCurrency },
+          coinbase_fee: { value: coinbaseFee?.amount ?? '0', currency: coinbaseFee?.currency ?? order?.paymentCurrency },
+          network_fee: { value: networkFee?.amount ?? '0', currency: networkFee?.currency ?? order?.paymentCurrency },
+          exchange_rate: order?.exchangeRate,
+          raw: response,
+        };
+      } else {
+        quote = await fetchBuyQuote({
+          paymentAmount: formData.amount,
+          paymentCurrency: formData.paymentCurrency,
+          purchaseCurrency: assetSymbol,
+          destinationNetwork: networkName,
+          paymentMethod: formData.paymentMethod || 'COINBASE_WIDGET',
+          destinationAddress: formData.destinationAddress,
+        });
+      }
 
       setCurrentQuote(quote);
     } catch (error) {
@@ -580,6 +659,7 @@ export function useOnramp() {
   return {
     // State
     guestCheckoutVisible,
+    embeddedOrderVisible,
     activePaymentMethod,
     isSandboxOrder,
     hostedUrl,
@@ -594,8 +674,10 @@ export function useOnramp() {
     buyConfig,
     // Actions
     createOrder,
+    createEmbeddedOrder,
     createWidgetSession,
     closeGuestCheckout,
+    closeEmbeddedOrder,
     fetchOptions,
     getAvailableNetworks,
     getAvailableAssets,

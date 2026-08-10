@@ -1,0 +1,12 @@
+diff --git a/node_modules/@coinbase/cdp-core/dist/native/index.native4.js b/node_modules/@coinbase/cdp-core/dist/native/index.native4.js
+index 54b4852..3055d39 100644
+--- a/node_modules/@coinbase/cdp-core/dist/native/index.native4.js
++++ b/node_modules/@coinbase/cdp-core/dist/native/index.native4.js
+@@ -173,6 +173,6 @@ const v = {
+       return await t();
+     } catch (i) {
+-      const o = i instanceof u && i.statusCode === 404, r = i instanceof Error && i.message.includes("com.apple.devicecheck.error error 2");
++      const o = i instanceof u && i.statusCode === 404, r = i instanceof Error && /com\.apple\.devicecheck\.error error (?:2|3)/.test(i.message);
+       if (c || !o && !r) throw i;
+       return r ? (console.warn("[Attestation] DCAppAttest key invalidated — clearing and re-initializing"), await this.clearAttestation()) : console.warn("[Attestation] Key not registered on backend (404) — retrying initialize"), c = !0, await this.initialize({ force: r }), await t();
+     }

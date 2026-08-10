@@ -106,7 +106,7 @@ export type OnrampFormData = {
   paymentCurrency: string;
   phoneNumber?: string;
   agreementAcceptedAt?: string;
-  /** Optional App2App-only override; when set, used as destinationAddress instead of the wallet address. */
+  /** Optional external-wallet override used instead of the wallet generated in this app. */
   destinationAddressOverride?: string;
 };
 
@@ -172,7 +172,9 @@ export function OnrampForm({
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
   const isGooglePay = paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
   const isGuestCheckout = isApplePay || isGooglePay;
-  const isApp2App = paymentMethod === 'APP2APP_COINBASE';
+  // All buy methods ultimately accept a destination address. Keep one
+  // consistently placed override instead of changing the form by payment type.
+  const supportsDestinationOverride = true;
 
   // User limits state
   const [userLimits, setUserLimits] = useState<{ weekly: UserLimit; lifetime: UserLimit } | null>(null);
@@ -268,15 +270,16 @@ const usSubs = useMemo(() => {
   // Use local state as single source of truth for sandbox mode
   const isSandbox = localSandboxEnabled;
 
-  // App2App optional override — when present, funds go here instead of the app wallet.
+  // Any buy method may send funds to an explicit external wallet.
   const trimmedAddressOverride = destinationAddressOverride.trim();
-  const hasAddressOverride = isApp2App && trimmedAddressOverride.length > 0;
+  const hasAddressOverride = supportsDestinationOverride && trimmedAddressOverride.length > 0;
   const isOverrideAddressValid = !hasAddressOverride
     ? false
     : isSandbox
       ? true
       : (isEvmNetwork ? isValidEvmAddress(trimmedAddressOverride) :
          isSolanaNetwork ? isValidSolanaAddress(trimmedAddressOverride) : false);
+  const displayedDestinationAddress = hasAddressOverride ? trimmedAddressOverride : address;
 
   // Check if Smart Account is available for EVM networks (production only)
   // TestFlight reviewers use hardcoded address as their "smart account"
@@ -284,7 +287,7 @@ const usSubs = useMemo(() => {
   const smartAccount = isTestFlight
     ? TEST_ACCOUNTS.wallets.evm  // TestFlight: Use hardcoded address
     : (currentUser?.evmSmartAccounts?.[0] as string | undefined); // Real users: Use CDP Smart Account
-  // Smart Account is only required when depositing to this app's wallet (not an App2App override).
+  // Smart Account is only required when depositing to this app's wallet (not an external override).
   const needsSmartAccount = !isSandbox && isEvmNetwork && !isOverrideAddressValid;
   const hasSmartAccount = !!smartAccount;
 
@@ -293,10 +296,10 @@ const usSubs = useMemo(() => {
     : (isEvmNetwork ? isEvmAddressValid :
        isSolanaNetwork ? isSolanaAddressValid : false); // In production, need valid address for supported networks
 
-  // App2App override alone is enough — no need for the app's own private key / wallet.
+  // An explicit external-wallet override alone is enough — no app wallet is required.
   const hasValidAddress = isOverrideAddressValid || hasValidWalletAddress;
 
-  // For production EVM networks, must have Smart Account (unless using an App2App address override)
+  // For production EVM networks, require a Smart Account only without an external override.
   const isFormValid = isAmountValid && !!network && !!asset && hasValidAddress && (!needsSmartAccount || hasSmartAccount);
 
   // User limits validation (Apple Pay + production mode)
@@ -389,6 +392,11 @@ const usSubs = useMemo(() => {
     // (iOS App Attest / Android Play Integrity). Native-only (no web).
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       arr.push({ display: 'Pay with Coinbase (App2App)', value: 'APP2APP_COINBASE' });
+      // Private-beta flow. Keep it selectable so a non-enabled project surfaces
+      // the upstream access response instead of hiding integration problems.
+      if (Platform.OS === 'ios') {
+        arr.push({ display: 'Embedded Order (Private Beta)', value: 'EMBEDDED_ORDER' });
+      }
     }
     return arr;
   }, [country, paymentCurrency]);
@@ -411,6 +419,12 @@ const usSubs = useMemo(() => {
       setPaymentMethod(methods[0]?.value || 'COINBASE_WIDGET');
     }
   }, [methods, paymentMethod]);
+
+  // A submission can open a modal while the swipe gesture is being terminated.
+  // Always release the form scroll lock when loading completes.
+  useEffect(() => {
+    if (!isLoading) setIsSwipeActive(false);
+  }, [isLoading]);
 
   // Initialize sandbox mode from shared state on mount only
   // After that, local state is the single source of truth
@@ -572,13 +586,13 @@ const usSubs = useMemo(() => {
     const currency = options.payment_currencies.find((c: any) => c.id === paymentCurrency);
     if (!currency?.limits) return null;
     
-    if (paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY' || paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY') {
+    if (paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY' || paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY' || paymentMethod === 'EMBEDDED_ORDER') {
       return {
         min: 2,
         max: 1000,
         currency: paymentCurrency,
         display: `$2 - $1000 ${paymentCurrency}`,
-        quotePaymentMethod: paymentMethod
+        quotePaymentMethod: paymentMethod === 'EMBEDDED_ORDER' ? 'GUEST_CHECKOUT_APPLE_PAY' : paymentMethod
       };
     } else if (paymentMethod === 'COINBASE_WIDGET') {
       const allLimits = currency.limits || [];
@@ -694,7 +708,9 @@ const usSubs = useMemo(() => {
           asset,
           network,
           paymentCurrency,
-          paymentMethod: paymentMethod === 'COINBASE_WIDGET' ? quoteMethod : paymentMethod
+          paymentMethod: paymentMethod === 'COINBASE_WIDGET' ? quoteMethod : paymentMethod,
+          destinationAddress: (supportsDestinationOverride && destinationAddressOverride.trim()) || address,
+          sandbox: localSandboxEnabled,
         });
 
         // Fetch user limits (Apple Pay + production + verified phone)
@@ -705,7 +721,7 @@ const usSubs = useMemo(() => {
     }, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [amount, asset, network, paymentCurrency, fetchQuote, paymentMethod, getCurrencyLimits, fetchUserLimitsData]);
+  }, [amount, asset, network, paymentCurrency, fetchQuote, paymentMethod, getCurrencyLimits, fetchUserLimitsData, supportsDestinationOverride, destinationAddressOverride, address, localSandboxEnabled]);
 
   const amountError = useMemo(() => {
     if (!limits || !amount || !Number.isFinite(amountNumber)) return null;
@@ -745,11 +761,11 @@ const usSubs = useMemo(() => {
       paymentCurrency,
       sandbox: localSandboxEnabled,
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
-      ...(isApp2App && trimmedOverride
+      ...(supportsDestinationOverride && trimmedOverride
         ? { destinationAddressOverride: trimmedOverride }
         : {}),
     });
-  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp, destinationAddressOverride, isApp2App]);
+  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp, destinationAddressOverride, supportsDestinationOverride]);
   return (
     <ScrollView
       contentContainerStyle={styles.content}
@@ -907,8 +923,8 @@ const usSubs = useMemo(() => {
         </View>
       </View>
 
-      {/* App2App destination address override */}
-      {isApp2App && (
+      {/* Consistent destination address override for every payment method */}
+      {supportsDestinationOverride && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Destination Address</Text>
           <View style={styles.overrideInputRow}>
@@ -1023,7 +1039,7 @@ const usSubs = useMemo(() => {
           </View>
           <Text style={styles.notificationText}>
             EVM onramp transactions require a Smart Account to receive funds. Your balances are stored in the Smart Account. Please ensure your Embedded Wallet is properly initialized.
-            {isApp2App ? ' Or enter a destination address override above.' : ''}
+            {supportsDestinationOverride ? ' Or enter a destination address override above.' : ''}
           </Text>
         </View>
       ) : !localSandboxEnabled && !hasValidAddress ? (
@@ -1035,7 +1051,7 @@ const usSubs = useMemo(() => {
           <Text style={styles.notificationText}>
             {hasAddressOverride && !isOverrideAddressValid
               ? `Enter a valid ${isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} destination address override`
-              : `Connect a valid ${isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} address to continue${isApp2App ? ', or enter a destination address override above' : ''}`}
+              : `Connect a valid ${isEvmNetwork ? 'EVM' : isSolanaNetwork ? 'Solana' : 'wallet'} address to continue${supportsDestinationOverride ? ', or enter a destination address override above' : ''}`}
           </Text>
         </View>
       ) : localSandboxEnabled && !address && !isOverrideAddressValid ? (
@@ -1056,7 +1072,7 @@ const usSubs = useMemo(() => {
           </View>
           <Text style={styles.notificationText}>
             Testing with address:{' '}
-            <Text style={styles.addressMono}>{address}</Text>
+            <Text style={styles.addressMono}>{displayedDestinationAddress}</Text>
           </Text>
 
           <Text style={[styles.notificationText, styles.italicNote]}>
@@ -1072,9 +1088,9 @@ const usSubs = useMemo(() => {
           <Text style={[styles.notificationText, { fontWeight: '600' }]}>
             Real transactions will be executed on-chain if successful
           </Text>
-          {address ? (
+          {displayedDestinationAddress ? (
             <Text style={[styles.notificationText, { marginTop: 8, fontFamily: 'monospace' }]}>
-              Using wallet: {address}
+              {hasAddressOverride ? 'Using destination override' : 'Using wallet'}: {displayedDestinationAddress}
             </Text>
           ) : !isEvmNetwork && !isSolanaNetwork ? (
             <Text style={[styles.notificationText, { marginTop: 8, fontStyle: 'italic', color: TEXT_SECONDARY }]}>
