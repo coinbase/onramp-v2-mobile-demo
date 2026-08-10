@@ -344,6 +344,7 @@ export function useOnramp() {
         destinationAddress,
         sandbox: formData.sandbox,
         isQuote: false,
+        reuseUserAuthToken: formData.reuseUserAuthToken !== false,
       });
 
       if (!result.hostedUrl) throw new Error("No embedded order payment URL received");

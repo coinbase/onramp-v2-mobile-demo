@@ -9,6 +9,9 @@ export const embeddedOrderInputSchema = z.object({
   destinationAddress: z.string().min(1),
   sandbox: z.boolean(),
   isQuote: z.boolean().optional().default(false),
+  // A dogfooding control: the device may opt out of replaying a token, but it
+  // can never supply a token itself.
+  reuseUserAuthToken: z.boolean().optional().default(true),
   locale: z.string().optional(),
 }).passthrough();
 

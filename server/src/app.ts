@@ -335,7 +335,7 @@ app.post('/onramp/order/embedded', async (req, res) => {
 
     const {
       paymentAmount, paymentCurrency, purchaseCurrency, destinationNetwork,
-      destinationAddress, sandbox, isQuote, locale,
+      destinationAddress, sandbox, isQuote, reuseUserAuthToken, locale,
     } = parsed.data;
     if (!isQuote && requiresDurableEmbeddedTokenStore && !(useDatabase && database)) {
       return res.status(503).json({
@@ -344,7 +344,11 @@ app.post('/onramp/order/embedded', async (req, res) => {
     }
     const userId = req.userId!;
     const tokenKey = embeddedAuthTokenKey(userId, destinationNetwork, destinationAddress, process.env.CDP_ENV || 'prod');
-    const userAuthToken = isQuote ? undefined : await getEmbeddedAuthToken(tokenKey);
+    // The device may opt out of reuse for dogfooding. It can never supply the
+    // token; this server remains the only token owner.
+    const userAuthToken = isQuote || !reuseUserAuthToken
+      ? undefined
+      : await getEmbeddedAuthToken(tokenKey);
     const clientIp = await resolveClientIp(req);
 
     const body = buildEmbeddedOrderPayload(

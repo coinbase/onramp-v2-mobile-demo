@@ -32,6 +32,11 @@ test('embedded quote never includes a reusable token', () => {
   assert.equal('userAuthToken' in payload, false);
 });
 
+test('embedded token reuse defaults on but can be disabled without accepting a device token', () => {
+  assert.equal(embeddedOrderInputSchema.parse({ ...input }).reuseUserAuthToken, true);
+  assert.equal(embeddedOrderInputSchema.parse({ ...input, reuseUserAuthToken: false }).reuseUserAuthToken, false);
+});
+
 test('token keys are destination and environment scoped without raw identifiers', () => {
   const first = embeddedAuthTokenKey('user-a', 'base', '0x1111111111111111111111111111111111111111', 'prod');
   const otherDestination = embeddedAuthTokenKey('user-a', 'base', '0x2222222222222222222222222222222222222222', 'prod');

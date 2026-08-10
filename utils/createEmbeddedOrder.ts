@@ -9,6 +9,8 @@ export type EmbeddedOrderRequest = {
   destinationAddress: string;
   sandbox: boolean;
   isQuote: boolean;
+  /** Embedded-only dogfooding control. The actual token remains server-only. */
+  reuseUserAuthToken: boolean;
 };
 
 /**
