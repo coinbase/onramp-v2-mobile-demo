@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { buildEmbeddedOrderPayload, embeddedAuthTokenKey, embeddedOrderInputSchema } from './embeddedOrder.js';
 
 import { generateJwt } from '@coinbase/cdp-sdk/auth';
 import { resolveClientIp } from './ip.js';
@@ -272,6 +273,109 @@ app.post('/onramp/session', async (req, res) => {
   } catch (error) {
     console.error('❌ [ONRAMP SESSION] Error:', error);
     res.status(500).json({ error: 'Failed to create onramp session' });
+  }
+});
+
+// ============================================================================
+// EMBEDDED ORDER TOKEN STORAGE
+// ============================================================================
+// userAuthToken is a reusable credential, not UI state. It never returns to the
+// mobile app and is scoped to the authenticated user + destination + network.
+const EMBEDDED_AUTH_TOKEN_TTL_SECONDS = 60 * 24 * 60 * 60;
+type EmbeddedAuthToken = { token: string; expiresAt: number };
+const embeddedAuthTokenStore = new Map<string, EmbeddedAuthToken>();
+const requiresDurableEmbeddedTokenStore = process.env.NODE_ENV === 'production';
+
+async function getEmbeddedAuthToken(key: string): Promise<string | undefined> {
+  const now = Date.now();
+  let record: EmbeddedAuthToken | undefined;
+  if (useDatabase && database) {
+    const raw = await database.get(key);
+    record = raw ? JSON.parse(raw) as EmbeddedAuthToken : undefined;
+  } else {
+    record = embeddedAuthTokenStore.get(key);
+  }
+
+  if (!record || record.expiresAt <= now) {
+    if (record && useDatabase && database) await database.del(key);
+    else if (record) embeddedAuthTokenStore.delete(key);
+    return undefined;
+  }
+  return record.token;
+}
+
+async function storeEmbeddedAuthToken(key: string, token: string): Promise<void> {
+  const record: EmbeddedAuthToken = {
+    token,
+    expiresAt: Date.now() + EMBEDDED_AUTH_TOKEN_TTL_SECONDS * 1000,
+  };
+  if (useDatabase && database) {
+    await database.set(key, JSON.stringify(record));
+    await database.expire(key, EMBEDDED_AUTH_TOKEN_TTL_SECONDS);
+  } else {
+    // Local-native development intentionally supports no-database startup. A
+    // restart drops token reuse, but the token never reaches device storage.
+    embeddedAuthTokenStore.set(key, record);
+  }
+}
+
+/**
+ * POST /onramp/order/embedded
+ *
+ * Creates a private-beta Embedded Order. The narrow request shape guarantees
+ * client contact/OTP/agreement fields never select the classic guest path.
+ * The server derives partnerUserRef and owns userAuthToken replay/storage.
+ */
+app.post('/onramp/order/embedded', async (req, res) => {
+  try {
+    const parsed = embeddedOrderInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid embedded-order request' });
+    }
+
+    const {
+      paymentAmount, paymentCurrency, purchaseCurrency, destinationNetwork,
+      destinationAddress, sandbox, isQuote, reuseUserAuthToken, locale,
+    } = parsed.data;
+    if (!isQuote && requiresDurableEmbeddedTokenStore && !(useDatabase && database)) {
+      return res.status(503).json({
+        error: 'Embedded Orders require DATABASE_URL in a production deployment',
+      });
+    }
+    const userId = req.userId!;
+    const tokenKey = embeddedAuthTokenKey(userId, destinationNetwork, destinationAddress, process.env.CDP_ENV || 'prod');
+    // The device may opt out of reuse for dogfooding. It can never supply the
+    // token; this server remains the only token owner.
+    const userAuthToken = isQuote || !reuseUserAuthToken
+      ? undefined
+      : await getEmbeddedAuthToken(tokenKey);
+    const clientIp = await resolveClientIp(req);
+
+    const body = buildEmbeddedOrderPayload(
+      { ...parsed.data, paymentAmount, paymentCurrency, purchaseCurrency, destinationNetwork, destinationAddress, sandbox, isQuote, ...(locale ? { locale } : {}) },
+      userId,
+      clientIp,
+      userAuthToken,
+    );
+
+    const upstream = await cdpFetch(`${resolveCdpApiBase()}/v2/onramp/orders`, 'POST', body);
+    const contentType = upstream.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return forwardCdpResponse(upstream, res);
+    }
+
+    const payload = await upstream.json();
+    const returnedToken = typeof payload?.userAuthToken === 'string' ? payload.userAuthToken : undefined;
+    if (upstream.ok && !isQuote && returnedToken) {
+      await storeEmbeddedAuthToken(tokenKey, returnedToken);
+    }
+
+    // Never expose this replay credential to React Native or console logs.
+    if (payload && typeof payload === 'object') delete payload.userAuthToken;
+    return res.status(upstream.status).json(payload);
+  } catch (error) {
+    console.error('❌ [EMBEDDED ORDER] Error:', error instanceof Error ? error.message : error);
+    return res.status(500).json({ error: 'Failed to create embedded onramp order' });
   }
 });
 
