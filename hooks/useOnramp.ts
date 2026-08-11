@@ -323,7 +323,15 @@ export function useOnramp() {
     }
   }, [getAssetSymbolFromName, getNetworkNameFromDisplayName, currentUser]);
 
-  const createWidgetSession = useCallback(async (formData: OnrampFormData) => {
+  /**
+   * Mint an authed widget session URL (classic Coinbase Widget path).
+   * Pass `isAppToApp: true` only for App2App web fallback so Attribute Buy/Send
+   * bill as App2App (COM2-3792). Classic COINBASE_WIDGET must omit this.
+   */
+  const createWidgetSession = useCallback(async (
+    formData: OnrampFormData,
+    options?: { isAppToApp?: boolean },
+  ) => {
     setIsProcessingPayment(true);
     try {
       const assetSymbol = getAssetSymbolFromName(formData.asset);
@@ -432,6 +440,13 @@ export function useOnramp() {
       if (url) {
         const separator = url.includes('?') ? '&' : '?';
         url = `${url}${separator}partnerUserId=${encodeURIComponent(partnerUserRef)}`;
+      }
+
+      // App2App web fallback billing signal — widget Attribute* reads this and
+      // passes isAppToApp: true (COM2-3792). Do not stamp for classic widget.
+      if (url && options?.isAppToApp) {
+        const separator = url.includes('?') ? '&' : '?';
+        url = `${url}${separator}isAppToApp=true`;
       }
 
       if (!url) throw new Error('No onrampUrl returned');
