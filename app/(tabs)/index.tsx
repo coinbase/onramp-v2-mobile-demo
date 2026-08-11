@@ -595,7 +595,8 @@ export default function Index() {
         }
 
         if (Platform.OS === "ios") {
-          const url = await createWidgetSession(updatedFormData);
+          // Stamp isAppToApp so widget Attribute Buy/Send bill as App2App (COM2-3792).
+          const url = await createWidgetSession(updatedFormData, { isAppToApp: true });
           if (url) {
             setApp2AppWebFallbackUrl(url);
             setApp2AppWebFallbackVisible(true);
