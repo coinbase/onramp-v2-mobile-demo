@@ -11,7 +11,8 @@
     "lint": "expo lint",
     "cdp:local": "node tools/cdp-local.js local",
     "cdp:npm": "node tools/cdp-local.js npm",
-    "cdp:status": "node tools/cdp-local.js status"
+    "cdp:status": "node tools/cdp-local.js status",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@coinbase/cdp-api-client": "0.0.116",
@@ -71,6 +72,7 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~9.2.0",
     "expo-build-properties": "^1.0.9",
+    "patch-package": "^8.0.1",
     "typescript": "~5.8.3"
   },
   "private": true

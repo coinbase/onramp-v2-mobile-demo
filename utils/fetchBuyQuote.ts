@@ -11,12 +11,14 @@ export async function fetchBuyQuote(payload: {
   paymentAmount: string;
   destinationNetwork: string;
   paymentMethod: string;
+  destinationAddress?: string;
 }) {
-  // In sandbox mode, use the current wallet address (could be manual override)
-  // In production, fall back to demo address for quote purposes
+  // Preserve the existing fallback, but use an explicit form override for any
+  // payment method when one is supplied.
   const isSandbox = getSandboxMode();
   const userAddress = getCurrentWalletAddress();
-  const destinationAddress = (isSandbox && userAddress) ? userAddress : demoAddressForNetwork(payload.destinationNetwork);
+  const destinationAddress = payload.destinationAddress?.trim()
+    || ((isSandbox && userAddress) ? userAddress : demoAddressForNetwork(payload.destinationNetwork));
 
   // If we couldn't generate a demo address for this network, return null instead of erroring
   if (!destinationAddress) {
