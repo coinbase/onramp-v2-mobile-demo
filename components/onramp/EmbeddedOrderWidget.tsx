@@ -102,8 +102,6 @@ export function EmbeddedOrderWidget({
           onAlert("Payment error", errorMessage, "error");
           break;
         case "onramp_api.cancel":
-          setIsProcessingPayment(false);
-          onAlert("Payment cancelled", "No payment was submitted.", "info");
           close();
           break;
         default:

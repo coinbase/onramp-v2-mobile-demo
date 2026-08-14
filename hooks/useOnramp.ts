@@ -344,6 +344,7 @@ export function useOnramp() {
         destinationAddress,
         sandbox: formData.sandbox,
         isQuote: false,
+        reuseUserAuthToken: formData.reuseUserAuthToken !== false,
       });
 
       if (!result.hostedUrl) throw new Error("No embedded order payment URL received");
@@ -572,6 +573,7 @@ export function useOnramp() {
           destinationAddress,
           sandbox: Boolean(formData.sandbox),
           isQuote: true,
+          reuseUserAuthToken: false,
         });
         const order = response?.order ?? response;
         const fees = order?.fees || [];

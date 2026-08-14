@@ -108,6 +108,8 @@ export type OnrampFormData = {
   agreementAcceptedAt?: string;
   /** Optional external-wallet override used instead of the wallet generated in this app. */
   destinationAddressOverride?: string;
+  /** Embedded-order-only dogfooding control; the actual token stays server-side. */
+  reuseUserAuthToken?: boolean;
 };
 
 type OnrampFormProps = {
@@ -159,6 +161,7 @@ export function OnrampForm({
   const [asset, setAsset] = useState("USDC");
   const [network, setNetwork] = useState("Base");
   const [paymentMethod, setPaymentMethod] = useState("APP2APP_COINBASE");
+  const [reuseUserAuthToken, setReuseUserAuthToken] = useState(true);
   const [destinationAddressOverride, setDestinationAddressOverride] = useState('');
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
   const [networkPickerVisible, setNetworkPickerVisible] = useState(false);
@@ -760,12 +763,13 @@ const usSubs = useMemo(() => {
       paymentMethod,
       paymentCurrency,
       sandbox: localSandboxEnabled,
+      ...(paymentMethod === 'EMBEDDED_ORDER' ? { reuseUserAuthToken } : {}),
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
       ...(supportsDestinationOverride && trimmedOverride
         ? { destinationAddressOverride: trimmedOverride }
         : {}),
     });
-  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, onSubmit, agreementTimestamp, destinationAddressOverride, supportsDestinationOverride]);
+  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, reuseUserAuthToken, onSubmit, agreementTimestamp, destinationAddressOverride, supportsDestinationOverride]);
   return (
     <ScrollView
       contentContainerStyle={styles.content}
@@ -921,6 +925,25 @@ const usSubs = useMemo(() => {
             <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
         </Pressable>
         </View>
+        {paymentMethod === 'EMBEDDED_ORDER' && (
+          <>
+            <View style={[styles.paymentRow, { marginTop: 12 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentLabel}>Reuse previous verification</Text>
+                <Text style={styles.helper}>Use the server-held Onramp token for this repeat order.</Text>
+              </View>
+              <Switch
+                value={reuseUserAuthToken}
+                onValueChange={setReuseUserAuthToken}
+                trackColor={{ true: BLUE, false: BORDER }}
+                thumbColor={Platform.OS === 'android' ? (reuseUserAuthToken ? '#ffffff' : '#f4f3f4') : undefined}
+              />
+            </View>
+            {!reuseUserAuthToken && (
+              <Text style={[styles.helper, { marginTop: 8 }]}>This order will use the normal Coinbase-hosted verification. A new reusable token may be saved for later orders.</Text>
+            )}
+          </>
+        )}
       </View>
 
       {/* Consistent destination address override for every payment method */}
@@ -1132,7 +1155,7 @@ const usSubs = useMemo(() => {
       {/* Terms Agreement */}
       <View style={styles.termsContainer}>
         <Text style={styles.termsText}>
-          By proceeding, I agree to Coinbase's{' '}
+          By proceeding, I agree to Coinbase&apos;s{' '}
           <Text style={styles.termsLink} onPress={() => Linking.openURL('https://www.coinbase.com/legal/guest-checkout/us')}>Guest Checkout Terms</Text>,{' '}
           <Text style={styles.termsLink} onPress={() => Linking.openURL('https://www.coinbase.com/legal/user_agreement/united_states')}>User Agreement</Text>, and{' '}
           <Text style={styles.termsLink} onPress={() => Linking.openURL('https://www.coinbase.com/legal/privacy')}>Privacy Policy</Text>
