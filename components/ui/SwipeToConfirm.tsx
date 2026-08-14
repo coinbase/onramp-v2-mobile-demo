@@ -89,8 +89,10 @@ export function SwipeToConfirm({ label, disabled = false, onConfirm, isLoading =
           translateX.setValue(next);
         },
         onPanResponderRelease: () => {
-          if (isLoading) return; // Extra safety check
+          // Gesture completion can race with submission state. Always release
+          // the parent ScrollView before honoring the loading guard.
           onSwipeEnd?.();
+          if (isLoading) return;
           const threshold = maxX * 0.8;
           if (currentXRef.current >= threshold) {
             complete();
@@ -100,10 +102,10 @@ export function SwipeToConfirm({ label, disabled = false, onConfirm, isLoading =
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderTerminate: () => {
-          if (!isLoading) {
-            onSwipeEnd?.();
-            snapBack(); // Only snap back if not loading
-          }
+          // Termination happens when a modal/loading state steals the gesture.
+          // Cleanup must run even then or Buy stays permanently unscrollable.
+          onSwipeEnd?.();
+          if (!isLoading) snapBack();
         },
       }),
     [disabled, knobSize, maxX, complete, snapBack, translateX, isLoading, onSwipeStart, onSwipeEnd] 

@@ -96,7 +96,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import * as WebBrowser from 'expo-web-browser';
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { APIGuestCheckoutWidget, App2AppWebFallbackWebView, OnrampForm, useApp2App, useOnramp } from "../../components";
+import { APIGuestCheckoutWidget, App2AppWebFallbackWebView, EmbeddedOrderWidget, OnrampForm, useApp2App, useOnramp } from "../../components";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { CoinbaseAppStatus } from "../../components/ui/CoinbaseAppStatus";
 import { AppAttestReset } from "../../components/ui/AppAttestReset";
@@ -134,6 +134,16 @@ export default function Index() {
     asset: string;
     network: string;
   } | null>(null);
+
+  // Append the active transaction's amount/asset/network to a webview alert
+  // message. Shared by every payment-method widget so success/error copy is
+  // consistent regardless of which flow (guest checkout, embedded order, ...)
+  // triggered it.
+  const withTransactionDetails = useCallback((message: string) => {
+    if (!currentTransaction) return message;
+    const txDetails = `\n\n${currentTransaction.amount} ${currentTransaction.paymentCurrency} → ${currentTransaction.asset} (${currentTransaction.network})`;
+    return message + txDetails;
+  }, [currentTransaction]);
 
   
 
@@ -325,8 +335,10 @@ export default function Index() {
 
   const {
     createOrder,
+    createEmbeddedOrder,
     createWidgetSession,
     closeGuestCheckout,
+    closeEmbeddedOrder,
     options,
     isLoadingOptions,
     optionsError,
@@ -337,6 +349,7 @@ export default function Index() {
     isLoadingQuote,
     fetchQuote,
     guestCheckoutVisible,
+    embeddedOrderVisible,
     activePaymentMethod,
     isSandboxOrder,
     hostedUrl,
@@ -529,8 +542,9 @@ export default function Index() {
     const networkApiName = getNetworkNameFromDisplayName(formData.network);
     const assetApiName = getAssetSymbolFromName(formData.asset);
 
-    // Determine the correct address based on network type (moved outside try-catch)
-    const isSandbox = getSandboxMode();
+    // Carry the form's selected mode through this async submission. Do not
+    // re-read mutable shared state after a gesture/modal transition.
+    const isSandbox = Boolean(formData.sandbox);
     const addressOverride =
       typeof formData.destinationAddressOverride === 'string'
         ? formData.destinationAddressOverride.trim()
@@ -614,6 +628,13 @@ export default function Index() {
         return;
       }
 
+      // Embedded Orders: Coinbase hosts phone/email OTP, limits, and payment.
+      // This route never sends contact fields from the device.
+      if ((formData.paymentMethod || '').toUpperCase() === 'EMBEDDED_ORDER') {
+        await createEmbeddedOrder(updatedFormData);
+        return;
+      }
+
       // Coinbase Widget: skip phone/email verification
       if ((formData.paymentMethod || '').toUpperCase() === 'COINBASE_WIDGET') {
         const url = await createWidgetSession(updatedFormData);
@@ -645,7 +666,8 @@ export default function Index() {
       await createOrder(updatedFormData);
     } catch (error: any) {
       const isGooglePay = formData.paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
-      const paymentLabel = isGooglePay ? 'Google Pay' : 'Apple Pay';
+      const isEmbeddedOrder = formData.paymentMethod === 'EMBEDDED_ORDER';
+      const paymentLabel = isEmbeddedOrder ? 'Embedded Order' : isGooglePay ? 'Google Pay' : 'Apple Pay';
 
       if (error.code === 'MISSING_EMAIL') {
         setPendingForm(updatedFormData);
@@ -825,7 +847,7 @@ export default function Index() {
       console.error('Error submitting form:', error);
       setIsProcessingPayment(false);
     }
-  }, [createOrder, createWidgetSession, startApp2App, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction, isCoinbaseAppInstalled, coinbaseAppState]);
+  }, [createOrder, createEmbeddedOrder, createWidgetSession, startApp2App, router, currentUser, evmAddress, solanaAddress, getNetworkNameFromDisplayName, getAssetSymbolFromName, signOut, currentTransaction, isCoinbaseAppInstalled, coinbaseAppState]);
     
   
   return (
@@ -890,16 +912,19 @@ export default function Index() {
           onClose={closeGuestCheckout}
           setIsProcessingPayment={setIsProcessingPayment}
           isSandbox={isSandboxOrder}
-          onAlert={(title, message, type) => {
-            let enhancedMessage = message;
-            if (currentTransaction) {
-              const txDetails = `\n\n${currentTransaction.amount} ${currentTransaction.paymentCurrency} → ${currentTransaction.asset} (${currentTransaction.network})`;
-              enhancedMessage = message + txDetails;
-            }
-            setApplePayAlert({ visible: true, title, message: enhancedMessage, type });
-          }}
+          onAlert={(title, message, type) => setApplePayAlert({ visible: true, title, message: withTransactionDetails(message), type })}
         />
       )}
+
+      <EmbeddedOrderWidget
+        visible={embeddedOrderVisible}
+        paymentUrl={hostedUrl}
+        isSandbox={isSandboxOrder}
+        onClose={closeEmbeddedOrder}
+        setIsProcessingPayment={setIsProcessingPayment}
+        setTransactionStatus={setTransactionStatus}
+        onAlert={(title, message, type) => setApplePayAlert({ visible: true, title, message: withTransactionDetails(message), type })}
+      />
 
       {/* iOS App2App web fallback — authed widget in partner WebView (COM2-3599) */}
       <App2AppWebFallbackWebView
