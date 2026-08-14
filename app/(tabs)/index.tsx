@@ -135,6 +135,16 @@ export default function Index() {
     network: string;
   } | null>(null);
 
+  // Append the active transaction's amount/asset/network to a webview alert
+  // message. Shared by every payment-method widget so success/error copy is
+  // consistent regardless of which flow (guest checkout, embedded order, ...)
+  // triggered it.
+  const withTransactionDetails = useCallback((message: string) => {
+    if (!currentTransaction) return message;
+    const txDetails = `\n\n${currentTransaction.amount} ${currentTransaction.paymentCurrency} → ${currentTransaction.asset} (${currentTransaction.network})`;
+    return message + txDetails;
+  }, [currentTransaction]);
+
   
 
 
@@ -902,14 +912,7 @@ export default function Index() {
           onClose={closeGuestCheckout}
           setIsProcessingPayment={setIsProcessingPayment}
           isSandbox={isSandboxOrder}
-          onAlert={(title, message, type) => {
-            let enhancedMessage = message;
-            if (currentTransaction) {
-              const txDetails = `\n\n${currentTransaction.amount} ${currentTransaction.paymentCurrency} → ${currentTransaction.asset} (${currentTransaction.network})`;
-              enhancedMessage = message + txDetails;
-            }
-            setApplePayAlert({ visible: true, title, message: enhancedMessage, type });
-          }}
+          onAlert={(title, message, type) => setApplePayAlert({ visible: true, title, message: withTransactionDetails(message), type })}
         />
       )}
 
@@ -920,7 +923,7 @@ export default function Index() {
         onClose={closeEmbeddedOrder}
         setIsProcessingPayment={setIsProcessingPayment}
         setTransactionStatus={setTransactionStatus}
-        onAlert={(title, message, type) => setApplePayAlert({ visible: true, title, message, type })}
+        onAlert={(title, message, type) => setApplePayAlert({ visible: true, title, message: withTransactionDetails(message), type })}
       />
 
       {/* iOS App2App web fallback — authed widget in partner WebView (COM2-3599) */}

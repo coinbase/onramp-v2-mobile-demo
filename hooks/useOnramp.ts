@@ -68,7 +68,7 @@
 import { createOnrampSession } from "@/utils/createOnrampSession";
 import { fetchBuyConfig } from "@/utils/fetchBuyConfig";
 import { useCurrentUser } from "@coinbase/cdp-hooks";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { OnrampFormData } from "../components/onramp/OnrampForm";
 import { TEST_ACCOUNTS } from "../constants/TestAccounts";
 import { createGuestCheckoutOrder } from "../utils/createGuestCheckoutOrder";
@@ -126,6 +126,7 @@ export function useOnramp() {
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [currentQuote, setCurrentQuote] = useState<any>(null);
   const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+  const quoteRequestIdRef = useRef(0);
   const { currentUser } = useCurrentUser();
   const [buyConfig, setBuyConfig] = useState<any>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -547,9 +548,18 @@ export function useOnramp() {
     destinationAddress?: string;
     sandbox?: boolean;
   }) => {
+    // The 500ms debounce in OnrampForm cancels a *pending* timeout on every
+    // keystroke, but once a call is in flight, a fast follow-up edit can
+    // start a second overlapping call before the first one's network
+    // response lands. Track a request id so only the most recently started
+    // call is allowed to write its result into state; a superseded call's
+    // late-arriving response is dropped instead of clobbering a newer quote.
+    const requestId = ++quoteRequestIdRef.current;
+    const isStale = () => requestId !== quoteRequestIdRef.current;
+
     const amt = Number.parseFloat(formData?.amount as any);
     if (!formData.amount || !formData.asset || !formData.network || !Number.isFinite(amt) || amt <= 0) {
-      setCurrentQuote(null);
+      if (!isStale()) setCurrentQuote(null);
       return;
     }
 
@@ -562,7 +572,7 @@ export function useOnramp() {
       if (formData.paymentMethod === 'EMBEDDED_ORDER') {
         const destinationAddress = formData.destinationAddress?.trim();
         if (!destinationAddress) {
-          setCurrentQuote(null);
+          if (!isStale()) setCurrentQuote(null);
           return;
         }
         const response = await requestEmbeddedOrder({
@@ -599,12 +609,13 @@ export function useOnramp() {
         });
       }
 
+      if (isStale()) return; // A newer fetchQuote call has already superseded this one.
       setCurrentQuote(quote);
     } catch (error) {
       console.log('Failed to fetch quote (unsupported network or demo address unavailable):', error);
-      setCurrentQuote(null);
+      if (!isStale()) setCurrentQuote(null);
     } finally {
-      setIsLoadingQuote(false);
+      if (!isStale()) setIsLoadingQuote(false);
     }
   }, [getAssetSymbolFromName, getNetworkNameFromDisplayName]);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { COLORS } from "../../constants/Colors";
@@ -39,7 +39,18 @@ export function EmbeddedOrderWidget({
 }) {
   const webViewRef = useRef<WebView>(null);
   const closedRef = useRef(false);
-  const finalUrl = useMemo(() => addSandboxPaymentParam(paymentUrl, isSandbox), [paymentUrl, isSandbox]);
+  // Cache the last non-empty URL. The parent clears `paymentUrl` in the same
+  // state update that flips `visible` to false; if this component reacted to
+  // that by unmounting the <Modal> immediately (instead of letting `visible`
+  // drive a normal close), the native modal gets torn out mid-dismissal and
+  // can leave the screen underneath unresponsive. Keeping the last URL around
+  // lets the Modal (and WebView) stay mounted for its own close transition.
+  const [activeUrl, setActiveUrl] = useState(paymentUrl);
+  useEffect(() => {
+    if (paymentUrl) setActiveUrl(paymentUrl);
+  }, [paymentUrl]);
+
+  const finalUrl = useMemo(() => addSandboxPaymentParam(activeUrl, isSandbox), [activeUrl, isSandbox]);
 
   useEffect(() => {
     if (visible) closedRef.current = false;
@@ -112,7 +123,7 @@ export function EmbeddedOrderWidget({
     }
   }, [close, onAlert, setIsProcessingPayment, setTransactionStatus]);
 
-  if (!paymentUrl) return null;
+  if (!visible && !activeUrl) return null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" presentationStyle="overFullScreen" onRequestClose={close}>
