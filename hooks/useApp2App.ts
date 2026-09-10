@@ -33,8 +33,22 @@ export interface StartApp2AppParams {
   purchaseCurrency: string;     // e.g. "USDC"
   destinationNetwork: string;   // e.g. "base"
   destinationAddress: string;   // wallet address (smart account for EVM)
-  paymentAmount: string;        // e.g. "25.00"
   paymentCurrency: string;      // e.g. "USD"
+  /**
+   * Exactly one of paymentAmount / purchaseAmount — mutually exclusive per
+   * onramp-service's mobile challenge contract.
+   *   paymentAmount:  "I want to spend exactly $25"      (fee-inclusive quote)
+   *   purchaseAmount: "I want to receive exactly 25 USDC" (fee-exclusive quote)
+   */
+  paymentAmount?: string;
+  purchaseAmount?: string;
+  /**
+   * Preselects the payment instrument on the Coinbase-app handoff screen.
+   * Optional — onramp-service's mobile challenge contract accepts it as one
+   * of CARD | ACH | APPLE_PAY | PAYPAL | FIAT_WALLET | CRYPTO_WALLET, but
+   * omitting it lets the user pick inside the Coinbase app as before.
+   */
+  paymentMethod?: string;
 }
 
 // Return target the Coinbase app redirects to when the onramp completes.
@@ -90,9 +104,17 @@ export function useApp2App() {
           ? `${isSandbox ? "sandbox-" : ""}${userId}`
           : undefined;
 
+        if (params.paymentAmount && params.purchaseAmount) {
+          throw new Error('Provide only one of paymentAmount or purchaseAmount, not both');
+        }
+
         console.log("📱 [APP2APP] Starting onramp", {
           sandbox: isSandbox,
           partnerUserRef,
+          paymentMethod: params.paymentMethod,
+          paymentCurrency: params.paymentCurrency,
+          paymentAmount: params.paymentAmount,
+          purchaseAmount: params.purchaseAmount,
         });
         if (partnerUserRef) {
           setCurrentPartnerUserRef(partnerUserRef);
@@ -103,8 +125,13 @@ export function useApp2App() {
           destinationAddress: params.destinationAddress,
           destinationNetwork: params.destinationNetwork,
           purchaseCurrency: params.purchaseCurrency,
-          paymentAmount: params.paymentAmount,
           paymentCurrency: params.paymentCurrency,
+          // Mutually exclusive: purchaseAmount ("receive exactly X crypto") wins
+          // over paymentAmount ("spend exactly X fiat") when both are supplied.
+          ...(params.purchaseAmount
+            ? { purchaseAmount: params.purchaseAmount }
+            : { paymentAmount: params.paymentAmount }),
+          ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
           redirectUrl: REDIRECT_URL,
           partnerUserRef,
         });

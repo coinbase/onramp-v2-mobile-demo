@@ -601,8 +601,13 @@ export default function Index() {
             purchaseCurrency: assetApiName,
             destinationNetwork: networkApiName,
             destinationAddress: targetAddress,
-            paymentAmount: updatedFormData.amount,
             paymentCurrency: updatedFormData.paymentCurrency || 'USD',
+            paymentMethod: updatedFormData.app2AppPaymentMethod || undefined,
+            // Mutually exclusive: 'receive' means the amount is the exact crypto
+            // amount to receive (purchaseAmount); default is exact fiat to spend.
+            ...(updatedFormData.app2AppAmountMode === 'receive'
+              ? { purchaseAmount: updatedFormData.amount }
+              : { paymentAmount: updatedFormData.amount }),
           });
           setIsProcessingPayment(false);
           return;

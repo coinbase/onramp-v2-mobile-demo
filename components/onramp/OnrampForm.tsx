@@ -110,7 +110,30 @@ export type OnrampFormData = {
   destinationAddressOverride?: string;
   /** Embedded-order-only dogfooding control; the actual token stays server-side. */
   reuseUserAuthToken?: boolean;
+  /**
+   * App2App-only. Preselects the payment instrument on the Coinbase-app
+   * handoff screen (CARD | ACH | APPLE_PAY | PAYPAL | FIAT_WALLET |
+   * CRYPTO_WALLET). Optional — leave unset to let the user choose in-app.
+   */
+  app2AppPaymentMethod?: string;
+  /**
+   * App2App-only. Whether `amount` is the fiat amount to pay ('pay', the
+   * default — sent as paymentAmount) or the crypto amount to receive
+   * ('receive' — sent as purchaseAmount). Mutually exclusive on the wire.
+   */
+  app2AppAmountMode?: 'pay' | 'receive';
 };
+
+/** Values accepted by onramp-service's App2App mobile challenge `paymentMethod` input. */
+const APP2APP_PAYMENT_METHODS = [
+  { display: 'Let user choose', value: '' },
+  { display: 'Card', value: 'CARD' },
+  { display: 'ACH', value: 'ACH' },
+  { display: 'Apple Pay', value: 'APPLE_PAY' },
+  { display: 'PayPal', value: 'PAYPAL' },
+  { display: 'Fiat Wallet', value: 'FIAT_WALLET' },
+  { display: 'Crypto Wallet', value: 'CRYPTO_WALLET' },
+];
 
 type OnrampFormProps = {
   address: string;
@@ -161,6 +184,9 @@ export function OnrampForm({
   const [asset, setAsset] = useState("USDC");
   const [network, setNetwork] = useState("Base");
   const [paymentMethod, setPaymentMethod] = useState("APP2APP_COINBASE");
+  const [app2AppPaymentMethod, setApp2AppPaymentMethod] = useState("");
+  const [app2AppPaymentPickerVisible, setApp2AppPaymentPickerVisible] = useState(false);
+  const [app2AppAmountMode, setApp2AppAmountMode] = useState<'pay' | 'receive'>('pay');
   const [reuseUserAuthToken, setReuseUserAuthToken] = useState(true);
   const [destinationAddressOverride, setDestinationAddressOverride] = useState('');
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
@@ -175,6 +201,9 @@ export function OnrampForm({
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
   const isGooglePay = paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
   const isGuestCheckout = isApplePay || isGooglePay;
+  const isApp2App = paymentMethod === 'APP2APP_COINBASE';
+  // Only meaningful for App2App — every other flow always specifies the fiat (pay) amount.
+  const app2AppReceiveMode = isApp2App && app2AppAmountMode === 'receive';
   // All buy methods ultimately accept a destination address. Keep one
   // consistently placed override instead of changing the form by payment type.
   const supportsDestinationOverride = true;
@@ -532,6 +561,20 @@ const usSubs = useMemo(() => {
   }, [paymentPickerVisible]);
 
   useEffect(() => {
+    if (app2AppPaymentPickerVisible) {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(sheetTranslate, { toValue: 0, useNativeDriver: true, damping: 20, stiffness: 90 }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(backdropOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(sheetTranslate, { toValue: 300, duration: 150, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [app2AppPaymentPickerVisible]);
+
+  useEffect(() => {
     if (paymentCurrencyPickerVisible) {
       Animated.parallel([
         Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
@@ -714,6 +757,7 @@ const usSubs = useMemo(() => {
           paymentMethod: paymentMethod === 'COINBASE_WIDGET' ? quoteMethod : paymentMethod,
           destinationAddress: (supportsDestinationOverride && destinationAddressOverride.trim()) || address,
           sandbox: localSandboxEnabled,
+          amountMode: app2AppReceiveMode ? 'receive' : 'pay',
         });
 
         // Fetch user limits (Apple Pay + production + verified phone)
@@ -724,7 +768,7 @@ const usSubs = useMemo(() => {
     }, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [amount, asset, network, paymentCurrency, fetchQuote, paymentMethod, getCurrencyLimits, fetchUserLimitsData, supportsDestinationOverride, destinationAddressOverride, address, localSandboxEnabled]);
+  }, [amount, asset, network, paymentCurrency, fetchQuote, paymentMethod, getCurrencyLimits, fetchUserLimitsData, supportsDestinationOverride, destinationAddressOverride, address, localSandboxEnabled, app2AppReceiveMode]);
 
   const amountError = useMemo(() => {
     if (!limits || !amount || !Number.isFinite(amountNumber)) return null;
@@ -764,12 +808,16 @@ const usSubs = useMemo(() => {
       paymentCurrency,
       sandbox: localSandboxEnabled,
       ...(paymentMethod === 'EMBEDDED_ORDER' ? { reuseUserAuthToken } : {}),
+      ...(paymentMethod === 'APP2APP_COINBASE' && app2AppPaymentMethod
+        ? { app2AppPaymentMethod }
+        : {}),
+      ...(paymentMethod === 'APP2APP_COINBASE' ? { app2AppAmountMode } : {}),
       agreementAcceptedAt: agreementTimestamp ? new Date(agreementTimestamp).toISOString() : new Date().toISOString(),
       ...(supportsDestinationOverride && trimmedOverride
         ? { destinationAddressOverride: trimmedOverride }
         : {}),
     });
-  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, reuseUserAuthToken, onSubmit, agreementTimestamp, destinationAddressOverride, supportsDestinationOverride]);
+  }, [isFormValidWithLimits, currentQuote, asset, network, address, localSandboxEnabled, paymentMethod, paymentCurrency, reuseUserAuthToken, app2AppPaymentMethod, app2AppAmountMode, onSubmit, agreementTimestamp, destinationAddressOverride, supportsDestinationOverride]);
   return (
     <ScrollView
       contentContainerStyle={styles.content}
@@ -808,9 +856,9 @@ const usSubs = useMemo(() => {
         )}
       </View>
 
-      {/* Buy Card */}
+      {/* Buy Card — App2App "You Receive" mode repurposes this as the crypto-amount input */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Buy</Text>
+        <Text style={styles.cardTitle}>{isApp2App ? (app2AppReceiveMode ? 'You Receive' : 'You Pay') : 'Buy'}</Text>
         <View style={styles.inputRow}>
         <TextInput
           value={amount}
@@ -820,13 +868,23 @@ const usSubs = useMemo(() => {
             keyboardType="decimal-pad"
             style={styles.amountInput}
           />
-          <Pressable 
-            style={styles.currencyTag}
-            onPress={() => setPaymentCurrencyPickerVisible(true)} // Make it clickable
-          >
-            <Text style={styles.currencyText}>{paymentCurrency}</Text>
-            <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
-          </Pressable>
+          {app2AppReceiveMode ? (
+            <Pressable
+              style={styles.currencyTag}
+              onPress={() => setAssetPickerVisible(true)}
+            >
+              <Text style={styles.currencyText}>{asset}</Text>
+              <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+            </Pressable>
+          ) : (
+            <Pressable
+              style={styles.currencyTag}
+              onPress={() => setPaymentCurrencyPickerVisible(true)} // Make it clickable
+            >
+              <Text style={styles.currencyText}>{paymentCurrency}</Text>
+              <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+            </Pressable>
+          )}
         </View>
           {/* Show error or limits */}
           {amountError ? (
@@ -857,36 +915,48 @@ const usSubs = useMemo(() => {
           )}
       </View>
 
-      {/* Receive Card */}
+      {/* Receive Card — App2App "You Receive" mode repurposes this as the estimated fiat cost */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Receive</Text>
+        <Text style={styles.cardTitle}>{isApp2App ? (app2AppReceiveMode ? 'You Pay (estimated)' : 'You Receive (estimated)') : 'Receive'}</Text>
         <View style={styles.inputRow}>
           <View style={styles.receiveAmountContainer}>
             {isLoadingQuote ? (
               <ActivityIndicator size="small" color={BLUE} />
             ) : (
               <Text style={styles.receiveAmount}>
-                {currentQuote?.purchase_amount?.value || '0'}
+                {app2AppReceiveMode
+                  ? (currentQuote?.payment_total?.value || '0')
+                  : (currentQuote?.purchase_amount?.value || '0')}
               </Text>
             )}
       </View>
-          <Pressable style={styles.assetSelect} onPress={() => setAssetPickerVisible(true)}>
-            <View style={styles.selectContent}>
-              {(() => {
-                const selectedAssetObj = availableAssets.find((assetObj: any) => 
-                  assetObj.name === asset || assetObj.symbol === asset
-                );
-                return selectedAssetObj?.icon_url && (
-                  <Image 
-                    source={{ uri: selectedAssetObj.icon_url }} 
-                    style={styles.assetIcon}
-                  />
-                );
-              })()}
-              <Text style={styles.assetText}>{asset}</Text>
-            </View>
-            <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
-        </Pressable>
+          {app2AppReceiveMode ? (
+            <Pressable
+              style={styles.currencyTag}
+              onPress={() => setPaymentCurrencyPickerVisible(true)}
+            >
+              <Text style={styles.currencyText}>{paymentCurrency}</Text>
+              <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+            </Pressable>
+          ) : (
+            <Pressable style={styles.assetSelect} onPress={() => setAssetPickerVisible(true)}>
+              <View style={styles.selectContent}>
+                {(() => {
+                  const selectedAssetObj = availableAssets.find((assetObj: any) =>
+                    assetObj.name === asset || assetObj.symbol === asset
+                  );
+                  return selectedAssetObj?.icon_url && (
+                    <Image
+                      source={{ uri: selectedAssetObj.icon_url }}
+                      style={styles.assetIcon}
+                    />
+                  );
+                })()}
+                <Text style={styles.assetText}>{asset}</Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+            </Pressable>
+          )}
       </View>
 
         {/* Network Row */}
@@ -925,6 +995,48 @@ const usSubs = useMemo(() => {
             <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
         </Pressable>
         </View>
+        {paymentMethod === 'APP2APP_COINBASE' && (
+          <>
+            <View style={[styles.paymentRow, { marginTop: 12 }]}>
+              <Text style={styles.paymentLabel}>Amount specifies</Text>
+            </View>
+            <View style={styles.segmentedControl}>
+              <Pressable
+                style={[styles.segmentButton, app2AppAmountMode === 'pay' && styles.segmentButtonActive]}
+                onPress={() => setApp2AppAmountMode('pay')}
+              >
+                <Text style={[styles.segmentButtonText, app2AppAmountMode === 'pay' && styles.segmentButtonTextActive]}>You Pay</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.segmentButton, app2AppAmountMode === 'receive' && styles.segmentButtonActive]}
+                onPress={() => setApp2AppAmountMode('receive')}
+              >
+                <Text style={[styles.segmentButtonText, app2AppAmountMode === 'receive' && styles.segmentButtonTextActive]}>You Receive</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.helper}>
+              {app2AppReceiveMode
+                ? 'The amount above is the exact crypto amount to receive (purchaseAmount).'
+                : 'The amount above is the exact fiat amount to spend (paymentAmount).'}
+            </Text>
+          </>
+        )}
+        {paymentMethod === 'APP2APP_COINBASE' && (
+          <View style={[styles.paymentRow, { marginTop: 12 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.paymentLabel}>Preferred payment method</Text>
+              <Text style={styles.helper}>Optional — preselects the instrument on the Coinbase handoff screen.</Text>
+            </View>
+            <Pressable style={styles.paymentSelect} onPress={() => setApp2AppPaymentPickerVisible(true)}>
+              <View style={styles.selectContent}>
+                <Text style={styles.paymentText}>
+                  {APP2APP_PAYMENT_METHODS.find(m => m.value === app2AppPaymentMethod)?.display || 'Let user choose'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} />
+            </Pressable>
+          </View>
+        )}
         {paymentMethod === 'EMBEDDED_ORDER' && (
           <>
             <View style={[styles.paymentRow, { marginTop: 12 }]}>
@@ -1430,6 +1542,59 @@ const usSubs = useMemo(() => {
         </View>
       </Modal>
 
+      {/* App2App payment method picker modal */}
+      <Modal
+        visible={app2AppPaymentPickerVisible}
+        transparent
+        animationType="none"
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setApp2AppPaymentPickerVisible(false)}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', opacity: backdropOpacity }]}
+          >
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setApp2AppPaymentPickerVisible(false)} />
+          </Animated.View>
+
+          <Animated.View style={[styles.modalSheet, { transform: [{ translateY: sheetTranslate }] }]}>
+            <View style={styles.modalHandle} />
+
+            <ScrollView
+              style={styles.modalScrollView}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+            >
+              {APP2APP_PAYMENT_METHODS.map((method, index) => {
+                const isSelected = method.value === app2AppPaymentMethod;
+
+                return (
+                  <Pressable
+                    key={`app2app-payment-${index}-${method.value}`}
+                    onPress={() => {
+                      setApp2AppPaymentMethod(method.value);
+                      setApp2AppPaymentPickerVisible(false);
+                    }}
+                    style={[styles.modalItem, isSelected && styles.modalItemSelected]}
+                  >
+                    <View style={styles.modalItemContent}>
+                      <View style={styles.modalItemLeft}>
+                        <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelected]}>
+                          {method.display}
+                        </Text>
+                      </View>
+                      {isSelected && (
+                        <Ionicons name="checkmark" size={20} color={BLUE} />
+                      )}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+        </View>
+      </Modal>
+
       {/* Country picker modal */}
       <Modal
         visible={countryPickerVisible}
@@ -1680,9 +1845,34 @@ const styles = StyleSheet.create({
     maxWidth: 180,           
   },
   paymentText: {
-    fontSize: 14,            
+    fontSize: 14,
     fontWeight: '500',
     color: TEXT_PRIMARY,
+  },
+  segmentedControl: {
+    flexDirection: 'row',
+    backgroundColor: BORDER,
+    borderRadius: 12,
+    padding: 3,
+    marginTop: 8,
+    gap: 3,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  segmentButtonActive: {
+    backgroundColor: BLUE,
+  },
+  segmentButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT_SECONDARY,
+  },
+  segmentButtonTextActive: {
+    color: WHITE,
   },
   applePayIcon: {
     width: 20,
