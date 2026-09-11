@@ -597,18 +597,20 @@ export default function Index() {
             : isCoinbaseAppInstalled;
 
         if (coinbaseOnrampAvailable) {
-          await startApp2App({
+          // Built as a single object per branch (not an inline ternary spread)
+          // to satisfy startApp2App's discriminated union at compile time.
+          const app2AppCommonParams = {
             purchaseCurrency: assetApiName,
             destinationNetwork: networkApiName,
             destinationAddress: targetAddress,
             paymentCurrency: updatedFormData.paymentCurrency || 'USD',
             paymentMethod: updatedFormData.app2AppPaymentMethod || undefined,
-            // Mutually exclusive: 'receive' means the amount is the exact crypto
-            // amount to receive (purchaseAmount); default is exact fiat to spend.
-            ...(updatedFormData.app2AppAmountMode === 'receive'
-              ? { purchaseAmount: updatedFormData.amount }
-              : { paymentAmount: updatedFormData.amount }),
-          });
+          };
+          if (updatedFormData.app2AppAmountMode === 'receive') {
+            await startApp2App({ ...app2AppCommonParams, purchaseAmount: updatedFormData.amount });
+          } else {
+            await startApp2App({ ...app2AppCommonParams, paymentAmount: updatedFormData.amount });
+          }
           setIsProcessingPayment(false);
           return;
         }
