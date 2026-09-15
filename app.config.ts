@@ -28,9 +28,16 @@ const config: ExpoConfig = {
       // Without these declarations, canOpenURL always returns false on iOS 9+
       // regardless of whether the Coinbase app is installed.
       LSApplicationQueriesSchemes: [
-        // CDP onramp app-to-app scheme — registered only by Coinbase app
+        // CDP onramp app-to-app schemes — registered only by Coinbase app
         // versions that correctly handle CDP session tokens. Used by
-        // canOpenCoinbaseOnramp() from @coinbase/cdp-react-native.
+        // canOpenCoinbaseOnramp() from @coinbase/cdp-react-native, which
+        // probes both and treats either as available. The Coinbase app is
+        // introducing the versioned .v2 scheme so partners can detect a
+        // build that supports newer App2App input-contract capabilities
+        // (e.g. purchaseAmount/paymentMethod) — see
+        // coinbase.ghe.com/consumer/react-native/pull/83147. Both must be
+        // declared here or canOpenURL silently denies the undeclared one.
+        "com.coinbase.cdp.onramp.v2",
         "com.coinbase.cdp.onramp",
         "com.coinbase.oauth.app-to-app-v3",
         "com.coinbase.oauth.app-to-app-v2",

@@ -8,7 +8,10 @@ import { getCountry, getCurrentWalletAddress, getSandboxMode, getSubdivision } f
 export async function fetchBuyQuote(payload: {
   paymentCurrency: string;
   purchaseCurrency: string;
-  paymentAmount: string;
+  /** Mutually exclusive with purchaseAmount — provide exactly one. */
+  paymentAmount?: string;
+  /** Mutually exclusive with paymentAmount — provide exactly one. */
+  purchaseAmount?: string;
   destinationNetwork: string;
   paymentMethod: string;
   destinationAddress?: string;
@@ -80,7 +83,10 @@ export async function fetchBuyQuote(payload: {
       paymentCurrency: payload.paymentCurrency,
       purchaseCurrency: payload.purchaseCurrency,
       destinationNetwork: payload.destinationNetwork,
-      paymentAmount: payload.paymentAmount,
+      // Mutually exclusive per onramp-service: send whichever side the user typed into.
+      ...(payload.purchaseAmount
+        ? { purchaseAmount: payload.purchaseAmount }
+        : { paymentAmount: payload.paymentAmount }),
       destinationAddress,
       // COINBASE_WIDGET and APP2APP_COINBASE are UI-only selections, not valid
       // onramp payment methods. Quote them as CARD for an indicative price; the
