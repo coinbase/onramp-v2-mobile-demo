@@ -15,11 +15,11 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
-    "@coinbase/cdp-api-client": "0.0.116",
-    "@coinbase/cdp-app-attest": "0.0.116",
-    "@coinbase/cdp-core": "0.0.116",
-    "@coinbase/cdp-hooks": "0.0.116",
-    "@coinbase/cdp-react-native": "0.0.116",
+    "@coinbase/cdp-api-client": "0.0.124",
+    "@coinbase/cdp-app-attest": "0.0.124",
+    "@coinbase/cdp-core": "0.0.124",
+    "@coinbase/cdp-hooks": "0.0.124",
+    "@coinbase/cdp-react-native": "0.0.124",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.3.10",

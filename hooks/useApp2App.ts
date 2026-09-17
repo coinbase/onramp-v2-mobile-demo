@@ -28,14 +28,31 @@ import { useCallback, useState } from "react";
 
 import { getSandboxMode, setCurrentPartnerUserRef } from "../utils/sharedState";
 
+/**
+ * Exactly one of paymentAmount / purchaseAmount — mutually exclusive at the
+ * type level (mirrors @coinbase/cdp-react-native's own OpenCoinbaseOnrampParams),
+ * per onramp-service's mobile challenge contract:
+ *   paymentAmount:  "I want to spend exactly $25"      (fee-inclusive quote)
+ *   purchaseAmount: "I want to receive exactly 25 USDC" (fee-exclusive quote)
+ */
+type App2AppAmountParams =
+  | { paymentAmount: string; purchaseAmount?: never }
+  | { purchaseAmount: string; paymentAmount?: never };
+
 /** Inputs for a single app2app onramp, supplied by the form/caller. */
-export interface StartApp2AppParams {
+export type StartApp2AppParams = App2AppAmountParams & {
   purchaseCurrency: string;     // e.g. "USDC"
   destinationNetwork: string;   // e.g. "base"
   destinationAddress: string;   // wallet address (smart account for EVM)
-  paymentAmount: string;        // e.g. "25.00"
   paymentCurrency: string;      // e.g. "USD"
-}
+  /**
+   * Preselects the payment instrument on the Coinbase-app handoff screen.
+   * Optional — onramp-service's mobile challenge contract accepts it as one
+   * of CARD | ACH | APPLE_PAY | PAYPAL | FIAT_WALLET | CRYPTO_WALLET, but
+   * omitting it lets the user pick inside the Coinbase app as before.
+   */
+  paymentMethod?: string;
+};
 
 // Return target the Coinbase app redirects to when the onramp completes.
 //
@@ -93,21 +110,38 @@ export function useApp2App() {
         console.log("📱 [APP2APP] Starting onramp", {
           sandbox: isSandbox,
           partnerUserRef,
+          paymentMethod: params.paymentMethod,
+          paymentCurrency: params.paymentCurrency,
+          paymentAmount: params.paymentAmount,
+          purchaseAmount: params.purchaseAmount,
         });
         if (partnerUserRef) {
           setCurrentPartnerUserRef(partnerUserRef);
         }
 
-        await openCoinbaseOnramp({
+        // Built as a single object per branch (not an inline ternary spread)
+        // so it satisfies openCoinbaseOnramp's discriminated union at compile
+        // time — TS doesn't distribute a union cleanly through multiple
+        // interleaved conditional spreads in one object literal.
+        const commonParams = {
           projectId: ONRAMP_PROJECT_ID,
           destinationAddress: params.destinationAddress,
           destinationNetwork: params.destinationNetwork,
           purchaseCurrency: params.purchaseCurrency,
-          paymentAmount: params.paymentAmount,
           paymentCurrency: params.paymentCurrency,
+          ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
           redirectUrl: REDIRECT_URL,
           partnerUserRef,
-        });
+        };
+
+        if (params.purchaseAmount) {
+          await openCoinbaseOnramp({ ...commonParams, purchaseAmount: params.purchaseAmount });
+        } else {
+          // The StartApp2AppParams union guarantees paymentAmount is set here
+          // (it's the only other variant), but TS's narrowing on a `?: never`
+          // discriminant doesn't fully prove that back through the else branch.
+          await openCoinbaseOnramp({ ...commonParams, paymentAmount: params.paymentAmount! });
+        }
       } catch (e: any) {
         console.error('❌ [APP2APP] Flow failed:', e);
         setError(e?.message || 'App-to-app onramp failed');

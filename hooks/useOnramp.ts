@@ -547,6 +547,8 @@ export function useOnramp() {
     paymentMethod?: string;
     destinationAddress?: string;
     sandbox?: boolean;
+    /** App2App-only: 'receive' means `amount` is the crypto (purchase) amount, not fiat. */
+    amountMode?: 'pay' | 'receive';
   }) => {
     // The 500ms debounce in OnrampForm cancels a *pending* timeout on every
     // keystroke, but once a call is in flight, a fast follow-up edit can
@@ -600,7 +602,9 @@ export function useOnramp() {
         };
       } else {
         quote = await fetchBuyQuote({
-          paymentAmount: formData.amount,
+          ...(formData.amountMode === 'receive'
+            ? { purchaseAmount: formData.amount }
+            : { paymentAmount: formData.amount }),
           paymentCurrency: formData.paymentCurrency,
           purchaseCurrency: assetSymbol,
           destinationNetwork: networkName,
