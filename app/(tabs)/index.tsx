@@ -91,12 +91,12 @@
  */
 
 import { useCurrentUser, useEvmAddress, useIsSignedIn, useSignOut, useSolanaAddress } from "@coinbase/cdp-hooks";
-import { canOpenCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import * as WebBrowser from 'expo-web-browser';
 import { Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { APIGuestCheckoutWidget, App2AppWebFallbackWebView, EmbeddedOrderWidget, OnrampForm, useApp2App, useOnramp } from "../../components";
+import { canOpenCoinbaseOnramp } from "../../utils/canOpenCoinbaseOnramp";
 import { CoinbaseAlert } from "../../components/ui/CoinbaseAlerts";
 import { CoinbaseAppStatus } from "../../components/ui/CoinbaseAppStatus";
 import { AppAttestReset } from "../../components/ui/AppAttestReset";
