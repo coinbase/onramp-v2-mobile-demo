@@ -4,14 +4,15 @@
  * ============================================================================
  *
  * Detects whether the installed Coinbase app supports the CDP onramp
- * app-to-app handoff by probing the `com.coinbase.cdp.onramp://` scheme
- * (via `canOpenCoinbaseOnramp` from @coinbase/cdp-react-native).
+ * app-to-app handoff by probing the `com.coinbase.cdp.onramp://` scheme and
+ * (temporarily, see `utils/canOpenCoinbaseOnramp.ts`) the versioned
+ * `com.coinbase.cdp.onramp.v2://` scheme too.
  *
- * This is more precise than probing `com.coinbase.consumer://` — the CDP
- * onramp scheme is only registered by Coinbase app versions that correctly
+ * This is more precise than probing `com.coinbase.consumer://` — these CDP
+ * onramp schemes are only registered by Coinbase app versions that correctly
  * handle the CDP session token. Older versions silently show an error screen.
  *
- * iOS requirement: `com.coinbase.cdp.onramp` must be listed under
+ * iOS requirement: both schemes must be listed under
  * `LSApplicationQueriesSchemes` in the app's Info.plist (see app.config.ts).
  *
  * The check re-runs whenever the app returns to the foreground so the UI
@@ -19,9 +20,9 @@
  * ============================================================================
  */
 
-import { canOpenCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { AppState } from "react-native";
+import { canOpenCoinbaseOnramp } from "../utils/canOpenCoinbaseOnramp";
 
 export type CoinbaseAppInstallState = "unknown" | "installed" | "not-installed";
 
