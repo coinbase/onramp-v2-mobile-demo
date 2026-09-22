@@ -3,8 +3,11 @@
  * useApp2App — APP-TO-APP ONRAMP ORCHESTRATION HOOK
  * ============================================================================
  *
- * Drives the full app-to-app onramp hand-off into the Coinbase retail app
- * using the @coinbase/cdp-react-native SDK. The SDK handles:
+ * Drives the full app-to-app onramp hand-off into the Coinbase retail app via
+ * utils/app2AppOnramp.ts (hand-rolled — does not use @coinbase/cdp-react-native's
+ * openCoinbaseOnramp(); calls @coinbase/cdp-app-attest directly and proxies all
+ * network calls through our own backend's /app2app/mobile/* routes). That
+ * module handles:
  *
  *   Step 0 (once per install) — iOS device-key registration
  *   ─────────────────────────────────────────────────────────
@@ -22,10 +25,10 @@
  * ============================================================================
  */
 
-import { openCoinbaseOnramp } from "@coinbase/cdp-react-native";
 import { useCurrentUser } from "@coinbase/cdp-hooks";
 import { useCallback, useState } from "react";
 
+import { runApp2AppOnramp } from "../utils/app2AppOnramp";
 import { getSandboxMode, setCurrentPartnerUserRef } from "../utils/sharedState";
 
 /**
@@ -120,7 +123,7 @@ export function useApp2App() {
         }
 
         // Built as a single object per branch (not an inline ternary spread)
-        // so it satisfies openCoinbaseOnramp's discriminated union at compile
+        // so it satisfies runApp2AppOnramp's discriminated union at compile
         // time — TS doesn't distribute a union cleanly through multiple
         // interleaved conditional spreads in one object literal.
         const commonParams = {
@@ -132,15 +135,20 @@ export function useApp2App() {
           ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
           redirectUrl: REDIRECT_URL,
           partnerUserRef,
+          // Per cdp-api PR #1765, 2 of the 4 App2App calls now require a CDP
+          // API-key JWT that can never live on-device — every call is proxied
+          // through our own backend (which holds the key and forwards to CDP)
+          // instead of straight to CDP.
+          apiBaseUrl: process.env.EXPO_PUBLIC_BASE_URL || "",
         };
 
         if (params.purchaseAmount) {
-          await openCoinbaseOnramp({ ...commonParams, purchaseAmount: params.purchaseAmount });
+          await runApp2AppOnramp({ ...commonParams, purchaseAmount: params.purchaseAmount });
         } else {
           // The StartApp2AppParams union guarantees paymentAmount is set here
           // (it's the only other variant), but TS's narrowing on a `?: never`
           // discriminant doesn't fully prove that back through the else branch.
-          await openCoinbaseOnramp({ ...commonParams, paymentAmount: params.paymentAmount! });
+          await runApp2AppOnramp({ ...commonParams, paymentAmount: params.paymentAmount! });
         }
       } catch (e: any) {
         console.error('❌ [APP2APP] Flow failed:', e);
