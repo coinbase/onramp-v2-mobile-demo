@@ -34,10 +34,15 @@ export type App2AppOnrampParams = App2AppAmountParams & {
 // survives across component remounts (mirrors openCoinbaseOnramp()'s guard).
 let isInProgress = false;
 
-function base64urlToBase64(value: string): string {
-  let out = value.replace(/-/g, "+").replace(/_/g, "/");
-  while (out.length % 4 !== 0) out += "=";
-  return out;
+/**
+ * Converts a base64url string (RFC 4648 §5, no padding) to standard base64.
+ * CDP challenges are minted with Go's base64.RawURLEncoding (`-`/`_`, no `=`).
+ * The @coinbase/cdp-app-attest native module expects standard base64 input.
+ */
+function base64urlToBase64(b64url: string): string {
+  let b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  return b64;
 }
 
 function isAttestationKeyError(err: unknown): boolean {
