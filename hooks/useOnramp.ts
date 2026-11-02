@@ -601,6 +601,11 @@ export function useOnramp() {
           raw: response,
         };
       } else {
+        // GUEST_CHECKOUT_APPLE_PAY / GUEST_CHECKOUT_GOOGLE_PAY quotes go through
+        // /onramp/order, which requires partnerUserRef to match the authenticated
+        // user (SECBUGS-21612) — must be the real userId, not a placeholder.
+        const userId = currentUser?.userId || 'unknown-user';
+        const partnerUserRef = `${getSandboxMode() ? 'sandbox-' : ''}${userId}`;
         quote = await fetchBuyQuote({
           ...(formData.amountMode === 'receive'
             ? { purchaseAmount: formData.amount }
@@ -610,6 +615,7 @@ export function useOnramp() {
           destinationNetwork: networkName,
           paymentMethod: formData.paymentMethod || 'COINBASE_WIDGET',
           destinationAddress: formData.destinationAddress,
+          partnerUserRef,
         });
       }
 
@@ -621,7 +627,7 @@ export function useOnramp() {
     } finally {
       if (!isStale()) setIsLoadingQuote(false);
     }
-  }, [getAssetSymbolFromName, getNetworkNameFromDisplayName]);
+  }, [getAssetSymbolFromName, getNetworkNameFromDisplayName, currentUser]);
 
   // Helper functions that use live options when available, else the offline fallback.
   const getAvailableNetworks = useCallback((selectedAsset?: string) => {

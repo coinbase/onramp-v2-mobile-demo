@@ -86,7 +86,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { COLORS } from '../../constants/Colors';
 import { TEST_ACCOUNTS } from '../../constants/TestAccounts';
 import { getCountry, getLifetimeTransactionThreshold, getPendingForm, getSandboxMode, getSubdivision, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCountry, setCurrentNetwork, setSandboxMode, setSubdivision } from '../../utils/sharedState';
@@ -189,6 +189,14 @@ export function OnrampForm({
   const [app2AppAmountMode, setApp2AppAmountMode] = useState<'pay' | 'receive'>('pay');
   const [reuseUserAuthToken, setReuseUserAuthToken] = useState(true);
   const [destinationAddressOverride, setDestinationAddressOverride] = useState('');
+  // Custom asset testing (internal): lets a tester type in a ticker/network not yet
+  // returned by /buy/options (e.g. an unlaunched CCS stablecoin). While true, the
+  // auto-clear effects below must not reset `asset`/`network` just because they're
+  // absent from the live options list.
+  const [isCustomAsset, setIsCustomAsset] = useState(false);
+  const [customAssetDraft, setCustomAssetDraft] = useState("");
+  const [customNetworkDraft, setCustomNetworkDraft] = useState("");
+  const [showCustomAssetInput, setShowCustomAssetInput] = useState(false);
   const [assetPickerVisible, setAssetPickerVisible] = useState(false);
   const [networkPickerVisible, setNetworkPickerVisible] = useState(false);
   const [paymentPickerVisible, setPaymentPickerVisible] = useState(false);
@@ -198,6 +206,7 @@ export function OnrampForm({
   const [agreementTimestamp, setAgreementTimestamp] = useState<number | null>(null);
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const sheetTranslate = useRef(new Animated.Value(300)).current;
+  const assetPickerScrollRef = useRef<ScrollView>(null);
   const isApplePay = paymentMethod === 'GUEST_CHECKOUT_APPLE_PAY';
   const isGooglePay = paymentMethod === 'GUEST_CHECKOUT_GOOGLE_PAY';
   const isGuestCheckout = isApplePay || isGooglePay;
@@ -492,10 +501,14 @@ const usSubs = useMemo(() => {
   };
 
   // Auto-clear invalid selections when options change
+  // Skipped entirely while a custom (internal-testing) asset/network is active —
+  // a custom ticker is intentionally absent from availableNetworks/availableAssets,
+  // so this would otherwise snap it back to the first real option every render.
   useEffect(() => {
+    if (isCustomAsset) return;
     // If current network is no longer valid for selected asset, reset to first available
     if (asset && availableNetworks.length > 0) {
-      const networkExists = availableNetworks.some((net: any) => 
+      const networkExists = availableNetworks.some((net: any) =>
         net.display_name === network || net.name === network
       );
       if (!networkExists) {
@@ -503,12 +516,13 @@ const usSubs = useMemo(() => {
         setNetwork(firstNetwork?.display_name || firstNetwork?.name || "");
       }
     }
-  }, [asset, availableNetworks, network]);
+  }, [asset, availableNetworks, network, isCustomAsset]);
 
   useEffect(() => {
+    if (isCustomAsset) return;
     // If current asset isn't available for selected network, clear it
     if (network && availableAssets.length > 0) {
-      const assetExists = availableAssets.some((assetObj: any) => 
+      const assetExists = availableAssets.some((assetObj: any) =>
         assetObj.name === asset || assetObj.symbol === asset
       );
       if (!assetExists) {
@@ -516,7 +530,7 @@ const usSubs = useMemo(() => {
         setAsset(firstAsset?.name || firstAsset?.symbol || "");
       }
     }
-  }, [network, availableAssets, asset]);
+  }, [network, availableAssets, asset, isCustomAsset]);
 
   useEffect(() => {
     if (assetPickerVisible) {
@@ -962,15 +976,22 @@ const usSubs = useMemo(() => {
         {/* Network Row */}
         <View style={styles.networkRow}>
           <Text style={styles.networkLabel}>Network</Text>
-          <Pressable style={styles.networkSelect} onPress={() => setNetworkPickerVisible(true)}>
+          {/* While a custom asset is active, the network was already typed alongside it —
+              the picker would otherwise show an empty list (availableNetworks is filtered
+              by an asset that doesn't exist in /buy/options), so it's disabled here. */}
+          <Pressable
+            style={styles.networkSelect}
+            onPress={() => !isCustomAsset && setNetworkPickerVisible(true)}
+            disabled={isCustomAsset}
+          >
             <View style={styles.selectContent}>
               {(() => {
-                const selectedNetworkObj = availableNetworks.find((net: any) => 
+                const selectedNetworkObj = availableNetworks.find((net: any) =>
                   net.display_name === network || net.name === network
                 );
                 return selectedNetworkObj?.icon_url && (
-                  <Image 
-                    source={{ uri: selectedNetworkObj.icon_url }} 
+                  <Image
+                    source={{ uri: selectedNetworkObj.icon_url }}
                     style={styles.networkIcon}
                   />
                 );
@@ -979,7 +1000,9 @@ const usSubs = useMemo(() => {
                  <Text style={styles.networkText}>{network}</Text>
                </View>
                </View>
-             <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} style={styles.selectChevron} />
+             {!isCustomAsset && (
+               <Ionicons name="chevron-down" size={16} color={TEXT_SECONDARY} style={styles.selectChevron} />
+             )}
           </Pressable>
         </View>
       </View>
@@ -1366,7 +1389,10 @@ const usSubs = useMemo(() => {
         presentationStyle="overFullScreen"
         onRequestClose={() => setAssetPickerVisible(false)}
       >
-        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <KeyboardAvoidingView
+          style={{ flex: 1, justifyContent: 'flex-end' }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
           {/* Backdrop - click to dismiss */}
           <Animated.View
             style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)', opacity: backdropOpacity }]}
@@ -1378,8 +1404,9 @@ const usSubs = useMemo(() => {
           <Animated.View style={[styles.modalSheet, { transform: [{ translateY: sheetTranslate }] }]}>
             {/* Handle bar */}
             <View style={styles.modalHandle} />
-            
-            <ScrollView 
+
+            <ScrollView
+              ref={assetPickerScrollRef}
               style={styles.modalScrollView}
               showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
@@ -1393,6 +1420,7 @@ const usSubs = useMemo(() => {
               <Pressable
                     key={`asset-${index}-${displayName}`}
                 onPress={() => {
+                      setIsCustomAsset(false);
                       setAsset(displayName);
                   setAssetPickerVisible(false);
                 }}
@@ -1417,9 +1445,81 @@ const usSubs = useMemo(() => {
                   </Pressable>
                 );
               })}
+
+              {/* Custom asset (internal testing): lets a tester type a ticker/network
+                  not yet returned by /buy/options, e.g. an unlaunched CCS stablecoin. */}
+              <Pressable
+                onPress={() => {
+                  setShowCustomAssetInput((v) => {
+                    const next = !v;
+                    if (next) {
+                      // Reveal the ticker/network form, which renders below the fold —
+                      // scroll it into view once the new content has laid out.
+                      setTimeout(() => assetPickerScrollRef.current?.scrollToEnd({ animated: true }), 50);
+                    }
+                    return next;
+                  });
+                }}
+                style={[styles.modalItem, isCustomAsset && styles.modalItemSelected]}
+              >
+                <View style={styles.modalItemContent}>
+                  <View style={styles.modalItemLeft}>
+                    <Text style={[styles.modalItemText, isCustomAsset && styles.modalItemTextSelected]}>
+                      Other (custom ticker)
+                    </Text>
+                  </View>
+                  {isCustomAsset && (
+                    <Ionicons name="checkmark" size={20} color={BLUE} />
+                  )}
+                </View>
+              </Pressable>
+
+              {showCustomAssetInput && (
+                <View style={styles.customAssetContainer}>
+                  <Text style={styles.customAssetLabel}>Ticker (e.g. USDJ)</Text>
+                  <TextInput
+                    value={customAssetDraft}
+                    onChangeText={(text) => setCustomAssetDraft(text.toUpperCase())}
+                    placeholder="USDJ"
+                    placeholderTextColor={TEXT_SECONDARY}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    style={styles.customAssetInput}
+                  />
+                  <Text style={[styles.customAssetLabel, { marginTop: 12 }]}>Network (e.g. solana)</Text>
+                  <TextInput
+                    value={customNetworkDraft}
+                    onChangeText={setCustomNetworkDraft}
+                    placeholder="solana"
+                    placeholderTextColor={TEXT_SECONDARY}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={styles.customAssetInput}
+                  />
+                  <Pressable
+                    disabled={!customAssetDraft.trim() || !customNetworkDraft.trim()}
+                    onPress={() => {
+                      setIsCustomAsset(true);
+                      setAsset(customAssetDraft.trim());
+                      setNetwork(customNetworkDraft.trim());
+                      setShowCustomAssetInput(false);
+                      setAssetPickerVisible(false);
+                    }}
+                    style={[
+                      styles.customAssetConfirm,
+                      (!customAssetDraft.trim() || !customNetworkDraft.trim()) && styles.customAssetConfirmDisabled
+                    ]}
+                  >
+                    <Text style={styles.customAssetConfirmText}>Use custom asset</Text>
+                  </Pressable>
+                  <Text style={styles.customAssetHint}>
+                    For internal testing of assets not yet listed (e.g. pre-launch CCS stablecoins). The asset must be allowlisted server-side or the transaction will fail.
+                  </Text>
+                </View>
+              )}
             </ScrollView>
           </Animated.View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Network picker modal */}
@@ -2067,6 +2167,47 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   modalScrollView: {},
+  customAssetContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  customAssetLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: TEXT_SECONDARY,
+    marginBottom: 6,
+  },
+  customAssetInput: {
+    fontSize: 16,
+    color: TEXT_PRIMARY,
+    backgroundColor: BORDER,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  customAssetConfirm: {
+    backgroundColor: BLUE,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  customAssetConfirmDisabled: {
+    opacity: 0.4,
+  },
+  customAssetConfirmText: {
+    color: WHITE,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  customAssetHint: {
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+    marginTop: 10,
+    lineHeight: 16,
+  },
   modalItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
