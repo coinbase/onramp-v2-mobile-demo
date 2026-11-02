@@ -105,6 +105,7 @@ import { TEST_ACCOUNTS } from "../../constants/TestAccounts";
 import { useCoinbaseAppInstalled } from "../../hooks/useCoinbaseAppInstalled";
 import { clearPhoneVerifyWasCanceled, getCountry, getCurrentNetwork, getCurrentPartnerUserRef, getCurrentWalletAddress, getPendingForm, getPhoneVerifyWasCanceled, getSandboxMode, getSubdivision, getTestWalletEvm, getTestWalletSol, getVerifiedPhone, isPhoneFresh60d, isTestSessionActive, setCurrentSolanaAddress, setCurrentWalletAddress, setPendingForm } from "../../utils/sharedState";
 import { createGuestCheckoutDebugInfo, openSupportEmail, SUPPORT_EMAIL } from "../../utils/supportEmail";
+import { getFriendlyOnrampErrorMessage } from "../../utils/onrampErrorMessages";
 
 
 const { BLUE, DARK_BG, CARD_BG, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, WHITE } = COLORS;
@@ -514,10 +515,11 @@ export default function Index() {
         } catch (error) {
           setPendingForm(null); // Clear pending form on error
           const errorMessage = error instanceof Error ? error.message : 'Unable to create transaction. Please try again.';
+          const friendlyMessage = getFriendlyOnrampErrorMessage(errorMessage);
           setApplePayAlert({
             visible: true,
             title: 'Transaction Failed',
-            message: `${errorMessage}\n\nContact ${SUPPORT_EMAIL} for support.`,
+            message: `${friendlyMessage}\n\nContact ${SUPPORT_EMAIL} for support.`,
             type: 'error',
             confirmText: 'Email Support',
             onConfirmCallback: async () => {
@@ -829,10 +831,11 @@ export default function Index() {
 
       // Generic error - show support option
       const errorMessage = error instanceof Error ? error.message : 'Unable to create transaction. Please try again.';
+      const friendlyMessage = getFriendlyOnrampErrorMessage(errorMessage);
       setApplePayAlert({
         visible: true,
         title: 'Transaction Failed',
-        message: `${errorMessage}\n\nContact ${SUPPORT_EMAIL} for support. We'll resolve the issue within 1 business day.`,
+        message: `${friendlyMessage}\n\nContact ${SUPPORT_EMAIL} for support. We'll resolve the issue within 1 business day.`,
         type: 'error',
         confirmText: 'Email Support',
         onConfirmCallback: async () => {

@@ -15,6 +15,13 @@ export async function fetchBuyQuote(payload: {
   destinationNetwork: string;
   paymentMethod: string;
   destinationAddress?: string;
+  /**
+   * Required for GUEST_CHECKOUT_APPLE_PAY / GUEST_CHECKOUT_GOOGLE_PAY: the server's
+   * /onramp/order route rejects any partnerUserRef that isn't the authenticated
+   * user's own userId (or `sandbox-${userId}`) — see SECBUGS-21612. Must be the
+   * real signed-in user's ID, not a placeholder.
+   */
+  partnerUserRef?: string;
 }) {
   // Preserve the existing fallback, but use an explicit form override for any
   // payment method when one is supplied.
@@ -34,7 +41,10 @@ export async function fetchBuyQuote(payload: {
 
   if (isGuestCheckout) {
     try {
-      const partnerUserRef = isSandbox ? 'sandbox-HSAHDSBDFH' : 'HSAHDSBDFH';
+      if (!payload.partnerUserRef) {
+        throw new Error('partnerUserRef is required for Apple Pay / Google Pay quotes');
+      }
+      const partnerUserRef = payload.partnerUserRef;
       const response = await createGuestCheckoutOrder({
         ...payload,
         isQuote: false,
