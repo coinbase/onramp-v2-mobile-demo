@@ -589,9 +589,10 @@ export default function Index() {
         network: networkApiName
       });
 
-      // App-to-app: device-attested hand-off when Coinbase app is installed.
-      // iOS without Coinbase app: authed widget session in an in-app WebView
-      // (COM2-3599 / COM2-3535) — no App Attest. Android without app: iOS-only message.
+      // App-to-app: Play Integrity on Android, App Attest on iOS, when the
+      // Coinbase app is installed. iOS without the app uses an authed widget
+      // session in an in-app WebView (COM2-3599 / COM2-3535). Android without
+      // the app has no in-app WebView fallback.
       if ((formData.paymentMethod || '').toUpperCase() === 'APP2APP_COINBASE') {
         const coinbaseOnrampAvailable =
           coinbaseAppState === "unknown"

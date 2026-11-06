@@ -259,6 +259,43 @@ open ios/OnrampV2Demo.xcworkspace
   error, and the Home screen has a **"Reset device attestation"** button to force
   a fresh key manually.
 
+## Android App2App (Play internal testing)
+
+Android does not use App Attest. Each Pay with Coinbase tap mints a challenge
+through the demo backend, then requests a Play Integrity token whose
+`requestHash` is that challenge string. The session body is
+`{ challenge, android: { integrityToken, packageName } }`. The package is
+`com.coinbase.cdp_onramp`.
+
+A sideload fails Play's `PLAY_RECOGNIZED` check. Install an internal-testing
+build from Play, and register that package plus its Play Integrity service
+account in the CDP portal for the same project the server's API key belongs to.
+Set `EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER` before the build. The return
+URL opens the app when `ANDROID_APP_LINK_SHA256` on the server is the Play App
+Signing certificate fingerprint.
+
+## Publishing an Android internal build
+
+Play internal testing is a manual GitHub Action: **Publish Android internal**.
+It prebuilds `com.coinbase.cdp_onramp`, signs the release bundle with the Play
+upload key, and uploads it to the internal track. A push to `master` does not
+publish.
+
+The action needs these repository secrets before it can succeed:
+
+| Secret | What it is |
+| --- | --- |
+| `ANDROID_UPLOAD_KEYSTORE_BASE64` | Base64 of the upload keystore. Play already has an upload key enrolled, so this must be that key (or the replacement after an admin reset). |
+| `ANDROID_KEYSTORE_PASSWORD` | Upload keystore password |
+| `ANDROID_KEY_ALIAS` | Upload key alias |
+| `ANDROID_KEY_PASSWORD` | Upload key password |
+| `PLAY_SERVICE_ACCOUNT_JSON` | Play Developer API service account invited on this app with release access |
+| `EXPO_PUBLIC_CDP_PROJECT_ID` | CDP project id, inlined into the bundle |
+| `EXPO_PUBLIC_BASE_URL` | Demo API base URL |
+| `EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER` | Numeric Cloud project linked under Play Integrity |
+
+`versionCode` is the UTC hour stamp `YYMMDDHH`, which stays under Play's limit and is higher than the local Gradle default of `1`. Two publishes in the same hour need a manual bump.
+
 ## Using the App
 
 ### First Time Setup
@@ -456,6 +493,7 @@ Check Expo logs:
 | `EXPO_PUBLIC_USE_EXPO_CRYPTO` | `true` for Expo Go (`npx expo start`); **`false`** for dev/native/TestFlight builds (`npx expo run:ios`, archives). Must be `false` for app2app/App Attest to work |
 | `EXPO_PUBLIC_ONRAMP_PROJECT_ID` | CDP project that owns the app2app onramp integration (attestation + onramp-mobile endpoints). Defaults to `EXPO_PUBLIC_CDP_PROJECT_ID` |
 | `EXPO_PUBLIC_APP_ATTEST_APP_ID` | iOS App Attest App ID in `teamID.bundleID` form; must match the build's signing team + bundle id and be allowlisted in the CDP project (required for app2app) |
+| `EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER` | Numeric Google Cloud project number linked to `com.coinbase.cdp_onramp` in Play Console. Required for Android App2App. Inlined at build time |
 | `EXPO_PUBLIC_APP2APP_VERBOSE` | Optional. `1` enables step-by-step app2app / App Attest debug logs on device |
 | `IOS_BUILD_NUMBER` | iOS build number (`CFBundleVersion`); bump for every TestFlight/App Store upload |
 
@@ -475,6 +513,7 @@ Check Expo logs:
 | `APNS_TEAM_ID` | Apple Developer Team ID |
 | `APNS_KEY` | APNs private key (.p8 file content) |
 | `DATABASE_URL` | Database URL for production deployment (supports Redis, MongoDB, etc. - uses in-memory storage if not set) |
+| `ANDROID_APP_LINK_SHA256` | Play App Signing SHA-256 for `/.well-known/assetlinks.json`. Leave empty and the route returns 404 |
 
 ## Documentation
 

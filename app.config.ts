@@ -3,6 +3,7 @@ import { ExpoConfig } from "expo/config";
 
 const withGooglePayWebView = require("./plugins/withGooglePayWebView");
 const withCdpAppAttest = require("./plugins/withCdpAppAttest");
+const withAndroidOnrampQueries = require("./plugins/withAndroidOnrampQueries");
 
 const config: ExpoConfig = {
   name: "Onramp V2 Demo",
@@ -65,6 +66,27 @@ const config: ExpoConfig = {
     },
     edgeToEdgeEnabled: true,
     package: "com.coinbase.cdp_onramp",
+    // Android App Links for the https return URL. Verified links also need
+    // /.well-known/assetlinks.json (see server/api/assetlinks.js).
+    intentFilters: [
+      {
+        action: "VIEW",
+        autoVerify: true,
+        data: [
+          {
+            scheme: "https",
+            host: "onramp-v2-mobile-demo-murex.vercel.app",
+            pathPrefix: "/onramp-return",
+          },
+          {
+            scheme: "https",
+            host: "onramp-v2-mobile-demo-murex.vercel.app",
+            pathPrefix: "/offramp-send",
+          },
+        ],
+        category: ["BROWSABLE", "DEFAULT"],
+      },
+    ],
   },
 
   web: {
@@ -96,6 +118,7 @@ const config: ExpoConfig = {
     ],
     withGooglePayWebView,
     withCdpAppAttest,
+    withAndroidOnrampQueries,
   ],
 
   experiments: { typedRoutes: true },
