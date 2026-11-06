@@ -9,10 +9,11 @@
  * network calls through our own backend's /app2app/mobile/* routes). That
  * module handles:
  *
- *   Step 0 (once per install) — iOS device-key registration
+ *   Step 0 (once per install, iOS only) — device-key registration
  *   ─────────────────────────────────────────────────────────
  *   Ensures the device's App Attest key is registered with the CDP onramp
- *   backend. No-op on subsequent calls once registered.
+ *   backend. No-op on subsequent calls once registered. Android has no
+ *   registration step; each call requests a fresh Play Integrity token.
  *
  *   Steps 1–4 (every call) — per-transaction handoff
  *   ───────────────────────────────────────────────────
@@ -135,6 +136,7 @@ export function useApp2App() {
           ...(params.paymentMethod ? { paymentMethod: params.paymentMethod } : {}),
           redirectUrl: REDIRECT_URL,
           partnerUserRef,
+          cloudProjectNumber: process.env.EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER,
           // Per cdp-api PR #1765, 2 of the 4 App2App calls now require a CDP
           // API-key JWT that can never live on-device — every call is proxied
           // through our own backend (which holds the key and forwards to CDP)

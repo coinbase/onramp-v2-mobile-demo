@@ -39,7 +39,7 @@ const STATUS_DETAILS: Record<
     hint:
       Platform.OS === "ios"
         ? "App2App opens an in-app WebView with an authed onramp session (no App Attest)."
-        : "Install the Coinbase app for App2App, or use Coinbase Widget. In-app WebView fallback is iOS-only in this demo.",
+        : "Install the Coinbase app to hand off with Play Integrity. In-app WebView fallback is iOS-only in this demo.",
   },
 };
 

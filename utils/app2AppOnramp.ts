@@ -6,9 +6,10 @@
  * Ports @coinbase/cdp-react-native's openCoinbaseOnramp() orchestration (read
  * from its unminified source) so we control both the network calls (proxied
  * through our own backend's /app2app/mobile/* routes — see server/src/app.ts)
- * and the on-device App Attest calls (@coinbase/cdp-app-attest, used directly
- * here). This lets our backend use clean routes matching cdp-api's current
- * contract, with no legacy path-param shapes to shim around.
+ * and the on-device attestation calls (@coinbase/cdp-app-attest, used directly
+ * here). iOS uses App Attest. Android uses Play Integrity and does not hash
+ * the challenge. This lets our backend use clean routes matching cdp-api's
+ * current contract, with no legacy path-param shapes to shim around.
  * ============================================================================
  */
 
@@ -28,6 +29,12 @@ export type App2AppOnrampParams = App2AppAmountParams & {
   redirectUrl: string;
   partnerUserRef?: string;
   apiBaseUrl: string;
+  /**
+   * Google Cloud project number linked to this app in Play Console.
+   * Required on Android so Play Integrity can prepare a token provider.
+   * Ignored on iOS.
+   */
+  cloudProjectNumber?: string;
 };
 
 // Only one physical App Attest ceremony can run at a time; module-level so it
@@ -120,7 +127,9 @@ function extractSessionToken(onrampUrl: string): string {
 
 async function createOnrampMobileSession(
   apiBaseUrl: string,
-  body: { challenge: string; ios: { keyId: string; assertion: string } },
+  body:
+    | { challenge: string; ios: { keyId: string; assertion: string } }
+    | { challenge: string; android: { integrityToken: string; packageName: string } },
 ): Promise<{ onrampUrl: string; sessionToken: string }> {
   const res = await postJson<{ session?: { onrampUrl?: string } }>(apiBaseUrl, "/app2app/mobile/sessions", body);
   const onrampUrl = res?.session?.onrampUrl;
@@ -233,11 +242,100 @@ async function runApp2AppOnrampInternal(params: App2AppOnrampParams): Promise<vo
   }
 }
 
-/** Runs the full app-to-app onramp flow: attestation registration (once per
- * device install) + per-transaction challenge/assertion/session handoff. */
+// Play Integrity prepare hits the network. Skip it when this process already
+// prepared the same cloud project number.
+let preparedCloudProjectNumber: string | undefined;
+
+async function ensurePlayIntegrityPrepared(cloudProjectNumber: string): Promise<void> {
+  const { initialize } = await import("@coinbase/cdp-app-attest");
+  if (preparedCloudProjectNumber === cloudProjectNumber) return;
+  try {
+    await initialize({ cloudProjectNumber });
+    preparedCloudProjectNumber = cloudProjectNumber;
+  } catch (err) {
+    preparedCloudProjectNumber = undefined;
+    throw err;
+  }
+}
+
+/**
+ * Android handoff. No device-key registration. The demo backend mints the
+ * challenge (CDP API key stays server-side). Play Integrity `requestHash` is
+ * that challenge string unchanged — do not base64-decode or hash it. A stale
+ * challenge is discarded; the retry mints a new one.
+ */
+async function runAndroidApp2AppOnramp(params: App2AppOnrampParams): Promise<void> {
+  const cloudProjectNumber = params.cloudProjectNumber?.trim();
+  if (!cloudProjectNumber) {
+    throw new Error(
+      "cloudProjectNumber is required on Android. Set EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER to the Google Cloud project number linked to this app in Play Console.",
+    );
+  }
+
+  const {
+    destinationAddress,
+    destinationNetwork,
+    purchaseCurrency,
+    paymentAmount,
+    purchaseAmount,
+    paymentCurrency,
+    paymentMethod,
+    redirectUrl,
+    partnerUserRef,
+    apiBaseUrl,
+  } = params;
+
+  const { isSupported, createAssertion } = await import("@coinbase/cdp-app-attest");
+  if (!(await isSupported())) {
+    throw new Error(
+      "Play Integrity is not available on this device. App2App on Android requires Google Play services and a build installed from Play.",
+    );
+  }
+
+  await ensurePlayIntegrityPrepared(cloudProjectNumber);
+
+  const challengeBody = {
+    purchaseCurrency,
+    destinationNetwork,
+    destinationAddress,
+    redirectUrl,
+    paymentCurrency,
+    ...(purchaseAmount ? { purchaseAmount } : { paymentAmount }),
+    ...(paymentMethod ? { paymentMethod } : {}),
+    ...(partnerUserRef ? { partnerUserRef } : {}),
+  };
+
+  const attemptHandoff = async () => {
+    const { challenge } = await createOnrampMobileChallenge(apiBaseUrl, challengeBody);
+    const assertion = await createAssertion(challenge);
+    const android = assertion.android;
+    if (!android?.integrityToken || !android.packageName) {
+      throw new Error("Play Integrity produced no Android integrity token");
+    }
+    const session = await createOnrampMobileSession(apiBaseUrl, {
+      challenge,
+      android: {
+        integrityToken: android.integrityToken,
+        packageName: android.packageName,
+      },
+    });
+    await Linking.openURL(session.onrampUrl);
+  };
+
+  try {
+    await attemptHandoff();
+  } catch (err) {
+    if (!isStaleAttestationError(err)) throw err;
+    await attemptHandoff();
+  }
+}
+
+/** Runs the full app-to-app onramp flow: iOS App Attest registration (once per
+ * device install) or an Android Play Integrity token, then the per-transaction
+ * challenge/session handoff. */
 export async function runApp2AppOnramp(params: App2AppOnrampParams): Promise<void> {
-  if (Platform.OS !== "ios") {
-    throw new Error("App2App onramp is only supported on iOS");
+  if (Platform.OS !== "ios" && Platform.OS !== "android") {
+    throw new Error("App2App onramp is only supported on iOS and Android");
   }
   if (params.paymentAmount && params.purchaseAmount) {
     throw new Error("Provide only one of paymentAmount or purchaseAmount, not both");
@@ -251,7 +349,11 @@ export async function runApp2AppOnramp(params: App2AppOnrampParams): Promise<voi
 
   isInProgress = true;
   try {
-    await runApp2AppOnrampInternal(params);
+    if (Platform.OS === "android") {
+      await runAndroidApp2AppOnramp(params);
+    } else {
+      await runApp2AppOnrampInternal(params);
+    }
   } finally {
     isInProgress = false;
   }
