@@ -259,6 +259,28 @@ open ios/OnrampV2Demo.xcworkspace
   error, and the Home screen has a **"Reset device attestation"** button to force
   a fresh key manually.
 
+## Publishing an Android internal build
+
+Play internal testing is a manual GitHub Action: **Publish Android internal**.
+It prebuilds `com.coinbase.cdp_onramp`, signs the release bundle with the Play
+upload key, and uploads it to the internal track. A push to `master` does not
+publish.
+
+The action needs these repository secrets before it can succeed:
+
+| Secret | What it is |
+| --- | --- |
+| `ANDROID_UPLOAD_KEYSTORE_BASE64` | Base64 of the upload keystore. Play already has an upload key enrolled, so this must be that key (or the replacement after an admin reset). |
+| `ANDROID_KEYSTORE_PASSWORD` | Upload keystore password |
+| `ANDROID_KEY_ALIAS` | Upload key alias |
+| `ANDROID_KEY_PASSWORD` | Upload key password |
+| `PLAY_SERVICE_ACCOUNT_JSON` | Play Developer API service account invited on this app with release access |
+| `EXPO_PUBLIC_CDP_PROJECT_ID` | CDP project id, inlined into the bundle |
+| `EXPO_PUBLIC_BASE_URL` | Demo API base URL |
+| `EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER` | Numeric Cloud project linked under Play Integrity |
+
+`versionCode` is the UTC hour stamp `YYMMDDHH`, which stays under Play's limit and is higher than the local Gradle default of `1`. Two publishes in the same hour need a manual bump.
+
 ## Using the App
 
 ### First Time Setup
