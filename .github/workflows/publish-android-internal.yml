@@ -8,6 +8,11 @@ name: Publish Android internal
 #   EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER
 on:
   workflow_dispatch:
+    inputs:
+      track:
+        description: Play track ID (internal, alpha for the default closed track, or a custom closed track name)
+        required: true
+        default: internal
 
 jobs:
   publish:
@@ -38,8 +43,6 @@ jobs:
           node-version: "20"
           cache: npm
 
-      - uses: android-actions/setup-android@v3
-
       - name: Require publish secrets
         run: bash tools/android-publish/check-android-publish-secrets.sh
 
@@ -55,11 +58,11 @@ jobs:
       - name: Sign and build the release bundle
         run: bash tools/android-publish/build-android-release-bundle.sh
 
-      - name: Upload to Play internal testing
+      - name: Upload to Play testing track
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.coinbase.cdp_onramp
           releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
-          track: internal
+          track: ${{ inputs.track }}
           status: completed
