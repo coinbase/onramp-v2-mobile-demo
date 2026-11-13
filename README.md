@@ -278,8 +278,9 @@ Signing certificate fingerprint.
 
 Play internal testing is a manual GitHub Action: **Publish Android internal**.
 It prebuilds `com.coinbase.cdp_onramp`, signs the release bundle with the Play
-upload key, and uploads it to the internal track. A push to `master` does not
-publish.
+upload key, and uploads it to the track you choose when running it: `internal`
+(the default), `alpha` for the default closed testing track, or a custom closed
+track name. A push to `master` does not publish.
 
 The action needs these repository secrets before it can succeed:
 
