@@ -38,12 +38,6 @@ jobs:
           node-version: "20"
           cache: npm
 
-      # The hosted runner's SDK already has its licenses accepted. Re-accepting
-      # with the runner's cmdline-tools exits 1 and fails the job.
-      - uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: false
-
       - name: Require publish secrets
         run: bash tools/android-publish/check-android-publish-secrets.sh
 
