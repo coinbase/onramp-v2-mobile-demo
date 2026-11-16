@@ -20,9 +20,19 @@
  * ============================================================================
  */
 
-import { canOpenCoinbaseOnramp } from "@coinbase/cdp-react-native";
+import { canOpenCoinbaseOnramp, COINBASE_ONRAMP_SCHEME } from "@coinbase/cdp-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { AppState } from "react-native";
+import { AppState, Linking } from "react-native";
+
+const COINBASE_ONRAMP_SCHEME_LEGACY = "com.coinbase.cdp.onramp://";
+
+async function probeScheme(url: string): Promise<boolean | string> {
+  try {
+    return await Linking.canOpenURL(url);
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
 
 export type CoinbaseAppInstallState = "unknown" | "installed" | "not-installed";
 
@@ -40,9 +50,15 @@ export function useCoinbaseAppInstalled(): UseCoinbaseAppInstalledResult {
 
   const check = useCallback(async () => {
     try {
-      const available = await canOpenCoinbaseOnramp();
+      const [available, v2, legacy] = await Promise.all([
+        canOpenCoinbaseOnramp(),
+        probeScheme(COINBASE_ONRAMP_SCHEME),
+        probeScheme(COINBASE_ONRAMP_SCHEME_LEGACY),
+      ]);
+      console.log("📱 [COINBASE APP] Detection", { available, v2, legacy });
       setState(available ? "installed" : "not-installed");
-    } catch {
+    } catch (e) {
+      console.error("📱 [COINBASE APP] Detection failed", e);
       setState("not-installed");
     }
   }, []);
