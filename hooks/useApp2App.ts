@@ -52,7 +52,7 @@ export type StartApp2AppParams = App2AppAmountParams & {
   /**
    * Preselects the payment instrument on the Coinbase-app handoff screen.
    * Optional — onramp-service's mobile challenge contract accepts it as one
-   * of CARD | ACH | APPLE_PAY | PAYPAL | FIAT_WALLET | CRYPTO_WALLET, but
+   * of CARD | ACH | APPLE_PAY | GOOGLE_PAY | PAYPAL | FIAT_WALLET | CRYPTO_WALLET, but
    * omitting it lets the user pick inside the Coinbase app as before.
    */
   paymentMethod?: string;

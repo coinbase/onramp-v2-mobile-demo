@@ -112,8 +112,8 @@ export type OnrampFormData = {
   reuseUserAuthToken?: boolean;
   /**
    * App2App-only. Preselects the payment instrument on the Coinbase-app
-   * handoff screen (CARD | ACH | APPLE_PAY | PAYPAL | FIAT_WALLET |
-   * CRYPTO_WALLET). Optional — leave unset to let the user choose in-app.
+   * handoff screen (CARD | ACH | APPLE_PAY | GOOGLE_PAY | PAYPAL |
+   * FIAT_WALLET | CRYPTO_WALLET). Optional — leave unset to let the user choose in-app.
    */
   app2AppPaymentMethod?: string;
   /**
@@ -130,6 +130,7 @@ const APP2APP_PAYMENT_METHODS = [
   { display: 'Card', value: 'CARD' },
   { display: 'ACH', value: 'ACH' },
   { display: 'Apple Pay', value: 'APPLE_PAY' },
+  { display: 'Google Pay', value: 'GOOGLE_PAY' },
   { display: 'PayPal', value: 'PAYPAL' },
   { display: 'Fiat Wallet', value: 'FIAT_WALLET' },
   { display: 'Crypto Wallet', value: 'CRYPTO_WALLET' },
