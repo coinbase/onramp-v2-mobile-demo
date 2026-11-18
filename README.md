@@ -295,7 +295,7 @@ The action needs these repository secrets before it can succeed:
 | `EXPO_PUBLIC_BASE_URL` | Demo API base URL |
 | `EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER` | Numeric Cloud project linked under Play Integrity |
 
-`versionCode` is the UTC hour stamp `YYMMDDHH`, which stays under Play's limit and is higher than the local Gradle default of `1`. Two publishes in the same hour need a manual bump.
+`versionCode` is `30000000` plus whole minutes since 2026-01-01 UTC. It goes up every minute, stays above the earlier `YYMMDDHH` codes, and stays under Play's limit. Two publishes in the same minute would collide; re-run the later one.
 
 ## Using the App
 
