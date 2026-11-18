@@ -59,6 +59,12 @@ function isStaleAttestationError(err: unknown): boolean {
   return message.includes("stale_attestation") || message.includes("attestation is too old");
 }
 
+// Play Integrity error -19: Google invalidated the prepared token provider.
+function isIntegrityProviderInvalidError(err: unknown): boolean {
+  const message = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+  return message.includes("integrity_token_provider_invalid");
+}
+
 async function postJson<T = unknown>(apiBaseUrl: string, path: string, body?: unknown): Promise<T> {
   const url = `${apiBaseUrl}${path}`;
   const res = await fetch(url, {
@@ -243,7 +249,8 @@ async function runApp2AppOnrampInternal(params: App2AppOnrampParams): Promise<vo
 }
 
 // Play Integrity prepare hits the network. Skip it when this process already
-// prepared the same cloud project number.
+// prepared the same cloud project number. Google can still invalidate the
+// prepared provider later (error -19); the handoff then prepares again.
 let preparedCloudProjectNumber: string | undefined;
 
 async function ensurePlayIntegrityPrepared(cloudProjectNumber: string): Promise<void> {
@@ -325,7 +332,12 @@ async function runAndroidApp2AppOnramp(params: App2AppOnrampParams): Promise<voi
   try {
     await attemptHandoff();
   } catch (err) {
-    if (!isStaleAttestationError(err)) throw err;
+    if (isIntegrityProviderInvalidError(err)) {
+      preparedCloudProjectNumber = undefined;
+      await ensurePlayIntegrityPrepared(cloudProjectNumber);
+    } else if (!isStaleAttestationError(err)) {
+      throw err;
+    }
     await attemptHandoff();
   }
 }
