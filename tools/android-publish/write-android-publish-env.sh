@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Write the Expo public env file for a Play build. Values stay in the file.
+# APP_VERSION here becomes the versionName (see tools/release/app-version.sh).
 set -euo pipefail
 
 umask 077
+app_version="$(bash "$(dirname "$0")/../release/app-version.sh")"
 onramp_project="${EXPO_PUBLIC_ONRAMP_PROJECT_ID:-$EXPO_PUBLIC_CDP_PROJECT_ID}"
 
 {
@@ -15,4 +17,7 @@ onramp_project="${EXPO_PUBLIC_ONRAMP_PROJECT_ID:-$EXPO_PUBLIC_CDP_PROJECT_ID}"
   if [ -n "${EXPO_PUBLIC_APP2APP_REDIRECT_URL:-}" ]; then
     printf 'EXPO_PUBLIC_APP2APP_REDIRECT_URL=%s\n' "$EXPO_PUBLIC_APP2APP_REDIRECT_URL"
   fi
+  printf 'APP_VERSION=%s\n' "$app_version"
 } > .env
+
+echo "Android versionName ${app_version}"
