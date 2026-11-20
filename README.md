@@ -248,6 +248,9 @@ open ios/OnrampV2Demo.xcworkspace
 4. In the Organizer, **Distribute App → App Store Connect → Upload** (Xcode
    creates/uses the distribution cert via your account).
 
+To build and upload from CI instead, see
+[Publishing an iOS TestFlight build](#publishing-an-ios-testflight-build).
+
 ### App Attest notes
 
 - App Attest keys are stored in the iOS **keychain**, which **survives app
@@ -296,6 +299,57 @@ The action needs these repository secrets before it can succeed:
 | `EXPO_PUBLIC_ANDROID_CLOUD_PROJECT_NUMBER` | Numeric Cloud project linked under Play Integrity |
 
 `versionCode` is `30000000` plus whole minutes since 2026-01-01 UTC. It goes up every minute, stays above the earlier `YYMMDDHH` codes, and stays under Play's limit. Two publishes in the same minute would collide; re-run the later one.
+
+## Publishing an iOS TestFlight build
+
+TestFlight builds can also come from a manual GitHub Action: **Publish iOS
+TestFlight**. It runs on a GitHub macOS runner without EAS: it writes `.env`
+from repository secrets, runs `expo prebuild`, installs pods, signs
+`com.coinbase.cdp-onramp` with the Apple Distribution certificate and App Store
+provisioning profile, checks that the signed app still has the production App
+Attest entitlement, and uploads the IPA to App Store Connect. A push to
+`master` does not publish.
+
+To run it: **Actions → Publish iOS TestFlight → Run workflow**. Leave `upload`
+checked to send the build to TestFlight. Uncheck it for a dry run that builds,
+signs, and verifies the IPA, then stops without uploading (the IPA is not kept
+as an artifact, because it contains the inlined `EXPO_PUBLIC_*` values).
+
+The build number is `30000000` plus whole minutes since 2026-01-01 UTC, the
+same scheme as the Android `versionCode`. The marketing version comes from
+`app.config.ts`. Two runs in the same minute would collide; re-run the later one.
+
+The action needs these repository secrets:
+
+| Secret | What it is | How to create it |
+| --- | --- | --- |
+| `APPLE_TEAM_ID` | 10-character Apple Developer team id | Apple Developer → Membership details |
+| `IOS_DIST_CERT_P12_BASE64` | Base64 of the Apple Distribution certificate and private key (`.p12`) | Create an **Apple Distribution** certificate (Certificates, Identifiers & Profiles), install it, export certificate + key from Keychain Access as `.p12`, then `base64 -i dist.p12 \| pbcopy` |
+| `IOS_DIST_CERT_PASSWORD` | Password chosen when exporting the `.p12` | Set during export |
+| `IOS_PROVISIONING_PROFILE_BASE64` | Base64 of an **App Store** provisioning profile for `com.coinbase.cdp-onramp` | Make sure the App ID has the **App Attest** capability, create an App Store distribution profile with the certificate above, download it, then `base64 -i profile.mobileprovision \| pbcopy` |
+| `APP_STORE_CONNECT_API_KEY_ID` | App Store Connect API key id | App Store Connect → Users and Access → Integrations → App Store Connect API → create a team key with the **App Manager** role |
+| `APP_STORE_CONNECT_ISSUER_ID` | Issuer id shown above the API key list | Same page |
+| `APP_STORE_CONNECT_API_KEY_P8_BASE64` | Base64 of the downloaded `AuthKey_<id>.p8` (download is only offered once) | `base64 -i AuthKey_<id>.p8 \| pbcopy` |
+| `EXPO_PUBLIC_CDP_PROJECT_ID` | CDP project id, inlined into the bundle | Shared with the Android action |
+| `EXPO_PUBLIC_APP_ATTEST_APP_ID` | `<APPLE_TEAM_ID>.com.coinbase.cdp-onramp` | The action fails if it does not match `APPLE_TEAM_ID` |
+| `EXPO_PUBLIC_BASE_URL` | Demo API base URL | Shared with the Android action |
+| `EXPO_PUBLIC_ONRAMP_PROJECT_ID` | Optional. CDP project that owns App2App; defaults to `EXPO_PUBLIC_CDP_PROJECT_ID` | Shared with the Android action |
+| `EXPO_PUBLIC_APP2APP_REDIRECT_URL` | Optional App2App return URL | Shared with the Android action |
+
+The App Store Connect API key secrets are only required when `upload` is checked.
+
+Rotating:
+
+- **Distribution certificate**: expires after a year. Create a new one, regenerate
+  the provisioning profile with it, and update `IOS_DIST_CERT_P12_BASE64`,
+  `IOS_DIST_CERT_PASSWORD`, and `IOS_PROVISIONING_PROFILE_BASE64` together.
+- **Provisioning profile**: regenerate and update `IOS_PROVISIONING_PROFILE_BASE64`
+  when it expires, when the certificate is renewed, or when App ID capabilities change.
+- **API key**: keys do not expire. If one is revoked or leaked, revoke it in App
+  Store Connect, create a new one, and update all three `APP_STORE_CONNECT_*` secrets.
+
+Signing material is decoded into a temporary keychain and the runner's temp
+directory, and deleted at the end of every run, including failed runs.
 
 ## Using the App
 

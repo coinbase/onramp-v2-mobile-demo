@@ -1,0 +1,104 @@
+name: Publish iOS TestFlight
+
+# Manual dispatch only. Does not run on push or pull requests.
+# Required repository secrets:
+#   APPLE_TEAM_ID, IOS_DIST_CERT_P12_BASE64, IOS_DIST_CERT_PASSWORD,
+#   IOS_PROVISIONING_PROFILE_BASE64, EXPO_PUBLIC_CDP_PROJECT_ID,
+#   EXPO_PUBLIC_APP_ATTEST_APP_ID, EXPO_PUBLIC_BASE_URL
+# Required when upload is true:
+#   APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+#   APP_STORE_CONNECT_API_KEY_P8_BASE64
+# Optional: EXPO_PUBLIC_ONRAMP_PROJECT_ID, EXPO_PUBLIC_APP2APP_REDIRECT_URL
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: Upload to TestFlight (false builds and signs the IPA, then stops)
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      IOS_UPLOAD: ${{ inputs.upload }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      EXPO_PUBLIC_CDP_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_CDP_PROJECT_ID }}
+      EXPO_PUBLIC_ONRAMP_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_ONRAMP_PROJECT_ID }}
+      EXPO_PUBLIC_APP_ATTEST_APP_ID: ${{ secrets.EXPO_PUBLIC_APP_ATTEST_APP_ID }}
+      EXPO_PUBLIC_BASE_URL: ${{ secrets.EXPO_PUBLIC_BASE_URL }}
+      EXPO_PUBLIC_APP2APP_REDIRECT_URL: ${{ secrets.EXPO_PUBLIC_APP2APP_REDIRECT_URL }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Require publish secrets
+        env:
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
+        run: bash tools/ios-publish/check-ios-publish-secrets.sh
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write build-time env
+        run: bash tools/ios-publish/write-ios-publish-env.sh
+
+      - name: Prebuild iOS
+        run: npx expo prebuild -p ios --non-interactive --no-install
+
+      - name: Install pods
+        working-directory: ios
+        run: bundle exec pod install
+
+      - name: Install signing certificate and provisioning profile
+        env:
+          IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: bash tools/ios-publish/install-ios-signing.sh
+
+      - name: Archive and export the signed IPA
+        run: bash tools/ios-publish/build-ios-ipa.sh
+
+      - name: Upload to TestFlight
+        if: inputs.upload
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8_BASE64 }}
+        run: bash tools/ios-publish/upload-ios-testflight.sh
+
+      - name: Remove signing material
+        if: always()
+        run: bash tools/ios-publish/cleanup-ios-signing.sh
