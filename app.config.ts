@@ -9,7 +9,7 @@ const config: ExpoConfig = {
   name: "Onramp V2 Demo",
   slug: "onramp-v2-demo",
   // Publish workflows set APP_VERSION in .env (tools/release/app-version.sh).
-  version: process.env.APP_VERSION ?? "1.1.1",
+  version: process.env.APP_VERSION || "1.1.1",
   scheme: "onrampdemo",
   userInterfaceStyle: "automatic",
   newArchEnabled: true,

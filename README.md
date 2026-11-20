@@ -300,7 +300,10 @@ The action needs these repository secrets before it can succeed:
 
 `versionCode` is `30000000` plus whole minutes since 2026-01-01 UTC. It goes up every minute, stays above the earlier `YYMMDDHH` codes, and stays under Play's limit. Two publishes in the same minute would collide; re-run the later one.
 
-App version: the `versionName` is `1.2.<number of commits on master up to the built commit>`, from `tools/release/app-version.sh`. The iOS action uses the same script, so one commit gets the same version on both platforms. The action runs only from `master`. Re-publishing the same commit keeps its version and gets a new `versionCode`.
+App version: the `versionName` is `1.2.<number of first-parent commits on master up to the built commit>`, from `tools/release/app-version.sh`. The iOS action uses the same script, so one commit gets the same version on both platforms. The action runs only from `master`. Re-publishing the same commit keeps its version and gets a new `versionCode`.
+
+- Keep `master` protected against force-pushes; rewriting its history can make versions go down.
+- Re-running an old workflow run builds and uploads that run's older version.
 
 ## Publishing an iOS TestFlight build
 
@@ -322,9 +325,13 @@ same scheme as the Android `versionCode`. The marketing version comes from
 `app.config.ts`. Two runs in the same minute would collide; re-run the later one.
 
 App version: the marketing version (`CFBundleShortVersionString`) is
-`1.2.<number of commits on master up to the built commit>`, the same as the
-Android `versionName` for that commit. The action runs only from `master`.
-Re-publishing the same commit keeps its version and gets a new build number.
+`1.2.<number of first-parent commits on master up to the built commit>`, the
+same as the Android `versionName` for that commit. Re-publishing the same commit
+keeps its version and gets a new build number. The `master` and re-run notes in
+the Android section apply here too.
+
+- Start every run from `master`, including `upload=false` dry runs.
+- Each new version needs Beta App Review before external TestFlight groups get it; internal testers don't need it.
 
 The action needs these repository secrets:
 
