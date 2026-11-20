@@ -5,16 +5,16 @@
 # cleanup-ios-signing.sh.
 set -euo pipefail
 
+if [ -z "${IOS_IPA_PATH:-}" ] || [ ! -f "$IOS_IPA_PATH" ]; then
+  echo "::error::No exported IPA found; the build step must run first"
+  exit 1
+fi
+
 umask 077
 export API_PRIVATE_KEYS_DIR="${RUNNER_TEMP}/private_keys"
 mkdir -p "$API_PRIVATE_KEYS_DIR"
 printf '%s' "$APP_STORE_CONNECT_API_KEY_P8_BASE64" | base64 -D \
   > "${API_PRIVATE_KEYS_DIR}/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
-
-if [ -z "${IOS_IPA_PATH:-}" ] || [ ! -f "$IOS_IPA_PATH" ]; then
-  echo "::error::No exported IPA found; the build step must run first"
-  exit 1
-fi
 
 xcrun altool --upload-app --type ios \
   --file "$IOS_IPA_PATH" \

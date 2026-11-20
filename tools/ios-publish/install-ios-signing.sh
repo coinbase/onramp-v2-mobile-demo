@@ -49,8 +49,13 @@ profile_app_id="$(plist_get Entitlements:application-identifier)"
 profile_attest="$(plist_get Entitlements:com.apple.developer.devicecheck.appattest-environment)"
 profile_get_task_allow="$(plist_get Entitlements:get-task-allow)"
 profile_has_devices="$(plist_get ProvisionedDevices:0)"
+profile_all_devices="$(plist_get ProvisionsAllDevices)"
 
 fail=0
+if [ -z "$profile_uuid" ]; then
+  echo "::error::Provisioning profile has no UUID"
+  exit 1
+fi
 if [ "$profile_team" != "$APPLE_TEAM_ID" ]; then
   echo "::error::Provisioning profile team does not match APPLE_TEAM_ID"
   fail=1
@@ -67,11 +72,18 @@ case "$profile_attest" in
     fail=1
     ;;
 esac
-if [ "$profile_get_task_allow" = "true" ] || [ -n "$profile_has_devices" ]; then
+if [ "$profile_get_task_allow" = "true" ] || [ -n "$profile_has_devices" ] ||
+  [ "$profile_all_devices" = "true" ]; then
   echo "::error::Provisioning profile is not an App Store distribution profile"
   fail=1
 fi
 [ "$fail" -eq 0 ] || exit 1
+
+# Record the UUID first so cleanup can remove the profile even if a copy fails.
+{
+  printf 'PROFILE_UUID=%q\n' "$profile_uuid"
+  printf 'PROFILE_NAME=%q\n' "$profile_name"
+} > "${work}/profile.env"
 
 # Xcode 16+ reads UserData; older tools read MobileDevice. Install to both.
 for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
@@ -80,10 +92,5 @@ for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
   cp "${work}/profile.mobileprovision" "${dir}/${profile_uuid}.mobileprovision"
 done
 rm -f "${work}/profile.plist"
-
-{
-  printf 'PROFILE_UUID=%q\n' "$profile_uuid"
-  printf 'PROFILE_NAME=%q\n' "$profile_name"
-} > "${work}/profile.env"
 
 echo "Installed provisioning profile \"${profile_name}\" (${profile_uuid})"

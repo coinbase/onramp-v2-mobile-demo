@@ -78,6 +78,10 @@ rm -rf "$check"
 mkdir -p "$check"
 unzip -q "$ipa" -d "$check"
 app="$(find "${check}/Payload" -maxdepth 1 -name '*.app' | head -n 1)"
+if [ -z "$app" ]; then
+  echo "::error::Exported IPA has no app in Payload"
+  exit 1
+fi
 codesign -d --entitlements - --xml "$app" 2> /dev/null > "${check}/entitlements.plist"
 attest="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.devicecheck.appattest-environment' \
   "${check}/entitlements.plist" 2> /dev/null || true)"

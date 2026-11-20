@@ -326,7 +326,7 @@ The action needs these repository secrets:
 | `APPLE_TEAM_ID` | 10-character Apple Developer team id | Apple Developer → Membership details |
 | `IOS_DIST_CERT_P12_BASE64` | Base64 of the Apple Distribution certificate and private key (`.p12`) | Create an **Apple Distribution** certificate (Certificates, Identifiers & Profiles), install it, export certificate + key from Keychain Access as `.p12`, then `base64 -i dist.p12 \| pbcopy` |
 | `IOS_DIST_CERT_PASSWORD` | Password chosen when exporting the `.p12` | Set during export |
-| `IOS_PROVISIONING_PROFILE_BASE64` | Base64 of an **App Store** provisioning profile for `com.coinbase.cdp-onramp` | Make sure the App ID has the **App Attest** capability, create an App Store distribution profile with the certificate above, download it, then `base64 -i profile.mobileprovision \| pbcopy` |
+| `IOS_PROVISIONING_PROFILE_BASE64` | Base64 of an **App Store** provisioning profile for `com.coinbase.cdp-onramp` | Make sure the App ID has the **App Attest**, **Associated Domains**, and **Push Notifications** capabilities, create an App Store distribution profile with the certificate above, download it, then `base64 -i profile.mobileprovision \| pbcopy` |
 | `APP_STORE_CONNECT_API_KEY_ID` | App Store Connect API key id | App Store Connect → Users and Access → Integrations → App Store Connect API → create a team key with the **App Manager** role |
 | `APP_STORE_CONNECT_ISSUER_ID` | Issuer id shown above the API key list | Same page |
 | `APP_STORE_CONNECT_API_KEY_P8_BASE64` | Base64 of the downloaded `AuthKey_<id>.p8` (download is only offered once) | `base64 -i AuthKey_<id>.p8 \| pbcopy` |
