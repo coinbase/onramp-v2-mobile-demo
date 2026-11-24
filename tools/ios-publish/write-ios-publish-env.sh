@@ -3,12 +3,14 @@
 # app.config.ts loads .env, so IOS_BUILD_NUMBER here becomes the iOS build number.
 # The build number is 30000000 plus whole minutes since 2026-01-01 UTC, the same
 # scheme as the Android versionCode: unique per minute and always increasing.
+# APP_VERSION becomes the marketing version (see tools/release/app-version.sh).
 set -euo pipefail
 
 umask 077
 BUILD_NUMBER_BASE=30000000
 BUILD_NUMBER_EPOCH=1767225600
 build_number="$((BUILD_NUMBER_BASE + ($(date -u +%s) - BUILD_NUMBER_EPOCH) / 60))"
+app_version="$(bash "$(dirname "$0")/../release/app-version.sh")"
 onramp_project="${EXPO_PUBLIC_ONRAMP_PROJECT_ID:-$EXPO_PUBLIC_CDP_PROJECT_ID}"
 
 {
@@ -21,6 +23,7 @@ onramp_project="${EXPO_PUBLIC_ONRAMP_PROJECT_ID:-$EXPO_PUBLIC_CDP_PROJECT_ID}"
     printf 'EXPO_PUBLIC_APP2APP_REDIRECT_URL=%s\n' "$EXPO_PUBLIC_APP2APP_REDIRECT_URL"
   fi
   printf 'IOS_BUILD_NUMBER=%s\n' "$build_number"
+  printf 'APP_VERSION=%s\n' "$app_version"
 } > .env
 
-echo "iOS build number ${build_number}"
+echo "iOS version ${app_version}, build number ${build_number}"
